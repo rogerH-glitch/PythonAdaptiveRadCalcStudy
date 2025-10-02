@@ -1,6 +1,22 @@
-__pycache__/
-*.pyc
+﻿# Python
 .venv/
-.env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
 .ipynb_checkpoints/
-*.png
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
+
+# Outputs
+results/*.csv
+results/plots/*
+!results/.gitkeep
+
+# Misc
+*.log

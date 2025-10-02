@@ -1,0 +1,82 @@
+# EXACT FILE CONTENT BEGINS
+version: 1
+notes: >
+  Validation cases for local peak view factor.
+  Default geometry assumption: parallel, centres aligned, facing each other.
+  Units in meters; angle in degrees.
+
+defaults:
+  method: adaptive
+  rel_tol: 3.0e-3        # ≈99.7% target
+  abs_tol: 1.0e-6
+  max_depth: 12
+  min_cell_area_frac: 1.0e-8
+  max_cells: 200000
+  time_limit_s: 60
+
+cases:
+
+  # ---------- NISTIR 6925 analytic obstructed benchmark (Table 1) ----------
+  - id: nist_analytic_obstructed_unit_squares
+    enabled: false            # set true once occluders are implemented
+    description: >
+      NISTIR 6925 Table 1 analytic obstructed case.
+      Two 1x1 squares separated by 1 unit; two 0.5x0.5 occluders at 3/4 distance.
+      Analytic F12 (obstructed) = 0.11562061.
+    geometry:
+      emitter:   { w: 1.0, h: 1.0 }
+      receiver:  { w: 1.0, h: 1.0 }
+      setback:   1.0
+      angle:     0
+      centres_aligned: true
+      facing_each_other: true
+      occluders:
+        - { w: 0.5, h: 0.5, position: { along_axis: 0.75, lateral: 0.0 }, back_to_back_pair: true }
+    expected:
+      F12: 0.11562061
+      tolerance:
+        type: relative
+        value: 3.0e-3
+    references:
+      - source: NISTIR 6925, Table 1 & Fig. 13
+        url: https://nvlpubs.nist.gov/nistpubs/Legacy/IR/nistir6925.pdf
+    method_overrides:
+      rel_tol: 1.0e-3
+
+  # ---------- User hand-calculation (unobstructed) ----------
+  - id: hc_5p1x2p1_s0p05
+    enabled: true
+    description: Unobstructed; parallel; centres aligned.
+    geometry: { emitter: { w: 5.1, h: 2.1 }, receiver: { w: 5.1, h: 2.1 }, setback: 0.05, angle: 0 }
+    expected: { F12: 0.998805, tolerance: { type: relative, value: 3.0e-3 } }
+
+  - id: hc_5p1x2p1_s1p0
+    enabled: true
+    description: Unobstructed; parallel; centres aligned.
+    geometry: { emitter: { w: 5.1, h: 2.1 }, receiver: { w: 5.1, h: 2.1 }, setback: 1.0, angle: 0 }
+    expected: { F12: 0.70274, tolerance: { type: relative, value: 3.0e-3 } }
+
+  - id: hc_5x2_s3p8
+    enabled: true
+    description: Unobstructed; parallel; centres aligned.
+    geometry: { emitter: { w: 5.0, h: 2.0 }, receiver: { w: 5.0, h: 2.0 }, setback: 3.8, angle: 0 }
+    expected: { F12: 0.17735, tolerance: { type: relative, value: 3.0e-3 } }
+
+  - id: hc_20p02x1p05_s0p81
+    enabled: true
+    description: Unobstructed; parallel; centres aligned.
+    geometry: { emitter: { w: 20.02, h: 1.05 }, receiver: { w: 20.02, h: 1.05 }, setback: 0.81, angle: 0 }
+    expected: { F12: 0.54375, tolerance: { type: relative, value: 3.0e-3 } }
+
+  - id: hc_20p02x1p05_s1p8
+    enabled: true
+    description: Unobstructed; parallel; centres aligned.
+    geometry: { emitter: { w: 20.02, h: 1.05 }, receiver: { w: 20.02, h: 1.05 }, setback: 1.8, angle: 0 }
+    expected: { F12: 0.27931, tolerance: { type: relative, value: 3.0e-3 } }
+
+  - id: hc_21x1_s3p67
+    enabled: true
+    description: Unobstructed; parallel; centres aligned.
+    geometry: { emitter: { w: 21.0, h: 1.0 }, receiver: { w: 21.0, h: 1.0 }, setback: 3.67, angle: 0 }
+    expected: { F12: 0.13285, tolerance: { type: relative, value: 3.0e-3 } }
+# EXACT FILE CONTENT ENDS
