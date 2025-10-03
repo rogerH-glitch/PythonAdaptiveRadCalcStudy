@@ -219,6 +219,14 @@ python main.py --method fixedgrid --emitter 5.1 2.1 --setback 1.0 --rc-mode sear
 python main.py --method montecarlo --emitter 5.1 2.1 --setback 1.0 --rc-mode search
 ```
 
+## Local Peak ≠ Center (General Geometries)
+
+> **IMPORTANT**: The local peak view factor equals the center-point value **only** for the special case of parallel, concentric, center-aligned E/R with no occluders.  
+> For offsets, rotations, extreme aspect ratios, or occluders, the local peak shifts away from the centroid.
+>
+> Use `--rc-mode search` (coarse-to-fine multi-start) to locate (x_peak, y_peak) on the receiver that maximizes the point VF.  
+> Do not average over receiver points when estimating the local peak.
+
 ### Analytical (Point) Evaluator
 
 The analytical backend computes the **point** view factor by integrating the kernel over the emitter for a specified receiver point `(rx, ry)`.  
