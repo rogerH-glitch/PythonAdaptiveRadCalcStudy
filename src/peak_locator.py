@@ -206,11 +206,17 @@ def _coarse_to_fine_search(
     if best_result is None:
         # Fallback to best grid point
         best_vf, best_x, best_y = grid_values[0]
+        # Check if we hit time limit or other limits
+        elapsed_time = time.perf_counter() - start_time
+        if elapsed_time >= time_limit:
+            status = STATUS_REACHED_LIMITS
+        else:
+            status = STATUS_FAILED
         best_result = {
             "x_peak": best_x,
             "y_peak": best_y,
             "vf_peak": best_vf,
-            "status": STATUS_FAILED
+            "status": status
         }
     
     # Add search metadata
@@ -245,13 +251,16 @@ def create_vf_evaluator(
     """
     
     if method == "analytical":
-        from .analytical import local_peak_vf_analytic_approx
+        from .analytical import vf_point_rect_to_point
         
         def evaluator(x: float, y: float) -> Tuple[float, Dict]:
             # For analytical method, we can evaluate at a specific point
-            # This is a simplified version - in practice, we'd need to modify
-            # the analytical method to accept a specific receiver point
-            vf = local_peak_vf_analytic_approx(em_w, em_h, rc_w, rc_h, setback)
+            vf = vf_point_rect_to_point(
+                em_w, em_h, rc_w, rc_h, setback, angle,
+                x, y, 
+                nx=method_params.get('analytical_nx', 240),
+                ny=method_params.get('analytical_ny', 240)
+            )
             return vf, {'method': 'analytical'}
         
         return evaluator

@@ -127,6 +127,21 @@ Default assumptions:
         help='Output directory (default: ./results)'
     )
     
+    # Analytical method tuning parameters
+    analytical_group = parser.add_argument_group('Analytical method tuning')
+    analytical_group.add_argument(
+        '--analytical-nx',
+        type=int,
+        default=240,
+        help='Emitter grid Nx for analytical approx (default: 240)'
+    )
+    analytical_group.add_argument(
+        '--analytical-ny',
+        type=int,
+        default=240,
+        help='Emitter grid Ny for analytical approx (default: 240)'
+    )
+    
     # Adaptive method tuning parameters
     adaptive_group = parser.add_argument_group('Adaptive method tuning')
     adaptive_group.add_argument(
@@ -512,6 +527,8 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
     
     # Create method-specific evaluator
     method_params = {
+        'analytical_nx': getattr(args, 'analytical_nx', 240),
+        'analytical_ny': getattr(args, 'analytical_ny', 240),
         'rel_tol': getattr(args, 'rel_tol', 3e-3),
         'abs_tol': getattr(args, 'abs_tol', 1e-6),
         'max_depth': getattr(args, 'max_depth', 12),

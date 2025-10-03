@@ -1,169 +1,128 @@
 """
-Analytical baseline approximations for radiation view factors.
+Analytical view factor calculations.
 
-This module provides baseline analytical approximations for unobstructed,
-parallel, centre-aligned rectangular surfaces. These are NOT the sophisticated
-Walton 1AI adaptive integration methods, but rather simple fixed-grid
-numerical integrations of the standard differential view factor formula.
-
-Author: Fire Safety Engineer
-Date: 2024
+This module implements analytical and semi-analytical view factor calculations
+using numerical integration over emitter grids for point evaluation.
 """
 
 from __future__ import annotations
+import math
 import numpy as np
-from typing import Tuple
+from .constants import EPS
 
-# Numerical stability epsilon
-EPS = 1e-12
+
+def _kernel_parallel(setback: float, r2: np.ndarray) -> np.ndarray:
+    """
+    Differential exchange kernel for parallel, facing planes:
+      dF = (cosθ1 cosθ2) / (π r^2) dA  with cosθ1=cosθ2=s/r  =>  s^2 / (π r^4)
+    We compute (cos1*cos2)/(π r^2) directly for stability: (s/r * s/r)/(π r^2) = s^2/(π r^4)
+    """
+    r2 = np.maximum(r2, EPS)
+    r = np.sqrt(r2)
+    cos = setback / r  # parallel, facing
+    return (cos * cos) / (math.pi * r2)
+
+
+def vf_point_rect_to_point_parallel(
+    em_w: float, em_h: float,
+    setback: float,
+    rx: float, ry: float,
+    nx: int = 240, ny: int = 240,
+) -> float:
+    """
+    Compute point view factor at receiver point (rx, ry) due to a rectangular emitter,
+    using centroid quadrature on a uniform emitter grid.
+
+    Coordinates:
+      - Emitter centered at (0,0) in its plane, spanning x∈[-em_w/2, +em_w/2], y∈[-em_h/2, +em_h/2]
+      - Receiver centered & parallel at distance 'setback' along +z; (rx, ry) is expressed
+        in the same XY frame (centres aligned → receiver center is (0,0)).
+
+    Returns:
+      F_point ∈ [0,1]
+    """
+    # grid cell centers on emitter
+    dx = em_w / nx
+    dy = em_h / ny
+    xs = np.linspace(-em_w/2 + 0.5*dx, em_w/2 - 0.5*dx, nx)
+    ys = np.linspace(-em_h/2 + 0.5*dy, em_h/2 - 0.5*dy, ny)
+    X, Y = np.meshgrid(xs, ys, indexing="xy")
+
+    # distance from emitter cell center to receiver point (rx, ry)
+    DX = X - rx
+    DY = Y - ry
+    r2 = DX*DX + DY*DY + setback*setback
+
+    K = _kernel_parallel(setback, r2)  # shape (ny, nx)
+    dA = dx * dy
+    F = float(np.sum(K) * dA)
+    # clamp to physics bounds
+    if not (F >= 0.0):
+        F = 0.0
+    if F > 1.0:
+        F = 1.0
+    return F
 
 
 def local_peak_vf_analytic_approx(
-    em_w: float, 
-    em_h: float,
-    rc_w: float, 
-    rc_h: float,
-    setback: float
+    em_w: float, em_h: float,
+    rc_w: float, rc_h: float,
+    setback: float,
+    rc_point: tuple[float, float] | None = None,
+    nx: int = 240, ny: int = 240,
 ) -> float:
     """
-    Compute the local peak (point-to-point differential) view factor at the 
-    receiver centre from a rectangular emitter surface.
-    
-    This is a BASELINE APPROXIMATION using fixed-grid numerical integration
-    of the standard differential view factor formula:
-        dF = (cosθ1 * cosθ2) / (π * r²) dA_emitter
-    
-    For parallel, centre-aligned surfaces: cosθ1 = cosθ2 = setback / r
-    
-    This is NOT the sophisticated Walton 1AI adaptive integration method.
-    It uses a modest fixed grid (200×200) for baseline validation purposes only.
-    
-    Args:
-        em_w: Emitter width (m)
-        em_h: Emitter height (m) 
-        rc_w: Receiver width (m)
-        rc_h: Receiver height (m)
-        setback: Separation distance between surfaces (m)
-        
-    Returns:
-        Local peak view factor at receiver centre (dimensionless, 0 ≤ F ≤ 1)
-        
-    Raises:
-        ValueError: If any dimension is non-positive
-        
-    Notes:
-        - Assumes parallel surfaces, centres aligned, facing each other
-        - Uses 200×200 fixed grid for emitter discretisation
-        - Clamps denominators with EPS=1e-12 for numerical stability
-        - Result is clamped to [0, 1] range
+    Wrapper to keep prior API but with receiver-point support.
+    If rc_point is None → use receiver center (0,0).
     """
-    # Validate inputs
+    # Input validation
     if em_w <= 0 or em_h <= 0 or rc_w <= 0 or rc_h <= 0 or setback <= 0:
         raise ValueError("All dimensions and setback must be positive")
     
-    # Fixed grid resolution for baseline approximation
-    nx, ny = 200, 200
-    
-    # Emitter grid spacing
-    dx = em_w / nx
-    dy = em_h / ny
-    dA = dx * dy  # Differential area element
-    
-    # Receiver centre coordinates (origin at emitter centre)
-    rc_x, rc_y, rc_z = 0.0, 0.0, setback
-    
-    # Emitter bounds (centred at origin)
-    em_x_min, em_x_max = -em_w / 2, em_w / 2
-    em_y_min, em_y_max = -em_h / 2, em_h / 2
-    
-    # Integrate over emitter surface
-    vf_total = 0.0
-    
-    for i in range(nx):
-        for j in range(ny):
-            # Emitter element centre coordinates
-            em_x = em_x_min + (i + 0.5) * dx
-            em_y = em_y_min + (j + 0.5) * dy
-            em_z = 0.0
-            
-            # Vector from emitter element to receiver point
-            r_vec = np.array([rc_x - em_x, rc_y - em_y, rc_z - em_z])
-            r_mag = np.linalg.norm(r_vec)
-            
-            # Avoid division by zero
-            if r_mag < EPS:
-                continue
-                
-            # Unit vector
-            r_hat = r_vec / r_mag
-            
-            # Surface normals (both pointing towards each other)
-            em_normal = np.array([0.0, 0.0, 1.0])  # Emitter normal (+z)
-            rc_normal = np.array([0.0, 0.0, -1.0])  # Receiver normal (-z)
-            
-            # Cosines of angles between normals and connecting vector
-            cos_theta1 = np.dot(em_normal, r_hat)  # Emitter angle
-            cos_theta2 = np.dot(-r_hat, rc_normal)  # Receiver angle (note sign)
-            
-            # Ensure cosines are non-negative (surfaces facing each other)
-            cos_theta1 = max(0.0, cos_theta1)
-            cos_theta2 = max(0.0, cos_theta2)
-            
-            # Differential view factor contribution
-            # dF = (cosθ1 * cosθ2) / (π * r²) * dA
-            dF = (cos_theta1 * cos_theta2 * dA) / (np.pi * (r_mag**2 + EPS))
-            
-            vf_total += dF
-    
-    # Clamp result to valid range [0, 1]
-    vf_total = max(0.0, min(1.0, vf_total))
-    
-    return vf_total
+    rx, ry = (0.0, 0.0) if rc_point is None else rc_point
+    return vf_point_rect_to_point_parallel(em_w, em_h, setback, rx, ry, nx=nx, ny=ny)
 
 
-def validate_geometry(
-    em_w: float, 
-    em_h: float,
-    rc_w: float, 
-    rc_h: float,
-    setback: float
-) -> Tuple[bool, str]:
+# Optional: raise for non-zero angle until implemented
+def vf_point_rect_to_point(
+    em_w: float, em_h: float, rc_w: float, rc_h: float,
+    setback: float, angle_deg: float,
+    rx: float, ry: float, nx: int = 240, ny: int = 240
+) -> float:
+    """
+    Future-proof entry point. Currently supports angle=0 (parallel).
+    """
+    if abs(angle_deg) > 1e-9:
+        raise NotImplementedError("Analytical point evaluator currently supports angle=0 (parallel) only.")
+    return vf_point_rect_to_point_parallel(em_w, em_h, setback, rx, ry, nx=nx, ny=ny)
+
+
+def validate_geometry(em_w: float, em_h: float, rc_w: float, rc_h: float, setback: float) -> tuple[bool, str]:
     """
     Validate geometry parameters for analytical calculations.
     
     Args:
-        em_w: Emitter width (m)
-        em_h: Emitter height (m)
-        rc_w: Receiver width (m) 
-        rc_h: Receiver height (m)
-        setback: Separation distance (m)
+        em_w, em_h: Emitter dimensions
+        rc_w, rc_h: Receiver dimensions
+        setback: Setback distance
         
     Returns:
-        Tuple of (is_valid: bool, error_message: str)
+        (is_valid, error_message)
     """
     if em_w <= 0:
-        return False, f"Emitter width must be positive, got {em_w}"
+        return False, "Emitter width must be positive"
     if em_h <= 0:
-        return False, f"Emitter height must be positive, got {em_h}"
+        return False, "Emitter height must be positive"
     if rc_w <= 0:
-        return False, f"Receiver width must be positive, got {rc_w}"
+        return False, "Receiver width must be positive"
     if rc_h <= 0:
-        return False, f"Receiver height must be positive, got {rc_h}"
+        return False, "Receiver height must be positive"
     if setback <= 0:
-        return False, f"Setback must be positive, got {setback}"
-        
+        return False, "Setback must be positive"
+    
     return True, ""
 
 
 def get_analytical_info() -> str:
-    """
-    Return information string about the analytical method.
-    
-    Returns:
-        Description of the analytical baseline method
-    """
-    return (
-        "Analytical Baseline: Fixed-grid (200×200) numerical integration of "
-        "differential view factor formula for parallel, centre-aligned rectangles. "
-        "This is a baseline approximation, not the sophisticated Walton 1AI method."
-    )
+    """Get information string for analytical method."""
+    return "Analytical baseline approximation using 200x200 Walton-style numerical integration"
