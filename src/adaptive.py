@@ -13,6 +13,7 @@ from typing import List, Tuple, Optional
 from dataclasses import dataclass
 import logging
 
+from .constants import EPS, STATUS_CONVERGED, STATUS_REACHED_LIMITS, STATUS_FAILED
 from .geometry import Rectangle, ViewFactorResult, validate_geometry
 
 logger = logging.getLogger(__name__)
@@ -197,8 +198,13 @@ class AdaptiveCalculator:
         
         iteration = 0
         max_iterations = 1000
+        start_time = time.perf_counter()
         
         while refinement_queue and iteration < max_iterations:
+            # Check time limit
+            if hasattr(self, '_time_limit') and (time.perf_counter() - start_time) > self._time_limit:
+                logger.warning(f"Reached time limit: {self._time_limit:.1f}s")
+                break
             # Get cell with largest error
             neg_error, _, current_cell = heapq.heappop(refinement_queue)
             current_error = -neg_error
@@ -208,7 +214,7 @@ class AdaptiveCalculator:
                 logger.warning(f"Reached maximum cells limit: {self._max_cells}")
                 break
             
-            relative_error = current_error / max(abs(total_integral), 1e-12)
+            relative_error = current_error / max(abs(total_integral), EPS)
             if relative_error < self._tolerance:
                 # Cell has converged
                 converged_cells.append(current_cell)
@@ -239,7 +245,7 @@ class AdaptiveCalculator:
             
             # Add subcells to appropriate queues
             for subcell in subcells:
-                subcell_relative_error = subcell.error / max(abs(total_integral), 1e-12)
+                subcell_relative_error = subcell.error / max(abs(total_integral), EPS)
                 if subcell_relative_error < self._tolerance:
                     converged_cells.append(subcell)
                 else:
@@ -252,6 +258,11 @@ class AdaptiveCalculator:
         final_integral += sum(cell.integral for _, _, cell in refinement_queue)
         
         converged = len(refinement_queue) == 0 and iteration < max_iterations
+        status = STATUS_CONVERGED if converged else STATUS_FAILED
+        if not converged and iteration >= max_iterations:
+            status = STATUS_REACHED_LIMITS
+        elif not converged and hasattr(self, '_time_limit') and (time.perf_counter() - start_time) > self._time_limit:
+            status = STATUS_REACHED_LIMITS
         total_cells = len(converged_cells) + len(refinement_queue)
         
         return final_integral, converged, total_cells
@@ -360,7 +371,7 @@ class AdaptiveCalculator:
                 r_vec = p2 - source_point
                 r = np.linalg.norm(r_vec)
                 
-                if r > 1e-12:  # Avoid division by zero
+                if r > EPS:  # Avoid division by zero
                     r_hat = r_vec / r
                     
                     cos1 = np.dot(n1, r_hat)

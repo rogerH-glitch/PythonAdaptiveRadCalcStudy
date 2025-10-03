@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-# PythonAdaptiveRadCalcStudy
-Python Rad Calc View Factor Validation
-=======
 # Radiation View Factor Validation Tool
 
 A local Python tool for calculating **local peak view factors** between rectangular surfaces under fire conditions. This tool implements multiple numerical methods for validation and comparison purposes.
@@ -34,6 +30,19 @@ This tool calculates the maximum differential (point) view factor over receiver 
 - **Flexibility**: Multiple output formats (console, CSV, JSON, YAML)
 - **Safety-Critical**: Comprehensive validation and error checking
 
+## Quickstart (Windows / PowerShell)
+
+```powershell
+# One-time per machine:
+.\scripts\setup.ps1
+
+# Run tests:
+python -m pytest -q
+
+# Run validation suite (CSV + plots into ./results):
+python main.py --cases DOCS/validation_cases.yaml --outdir results --plot
+```
+
 ## Installation
 
 ### Prerequisites
@@ -49,13 +58,19 @@ pip install -r requirements.txt
 
 ### Required Packages
 
-- `numpy>=1.24.0` - Numerical computations
-- `scipy>=1.10.0` - Scientific computing utilities  
-- `matplotlib>=3.7.0` - Plotting and visualisation
-- `pyyaml>=6.0.0` - YAML configuration support
-- `pytest>=7.0.0` - Testing framework
+- `numpy` - Numerical computations
+- `scipy` - Scientific computing utilities  
+- `matplotlib` - Plotting and visualisation
+- `pyyaml` - YAML configuration support
 
-## Quick Start
+### Development Dependencies
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+- `pytest` - Testing framework
+- `coverage` - Code coverage analysis
 
 ### Basic Usage
 
@@ -237,4 +252,3 @@ When contributing to this project:
 ---
 
 **Note**: This tool is designed for validation and research purposes in fire safety engineering. Always validate results against established methods and consult with qualified fire protection engineers for critical applications.
->>>>>>> 68dea65 (Step 4: scaffold + CLI + YAML runner; ready for analytical baseline)

@@ -11,6 +11,7 @@ from numpy.polynomial.legendre import leggauss
 from typing import Tuple
 import logging
 
+from .constants import EPS, STATUS_CONVERGED, STATUS_REACHED_LIMITS, STATUS_FAILED
 from .geometry import Rectangle, ViewFactorResult, validate_geometry
 
 logger = logging.getLogger(__name__)
@@ -222,7 +223,7 @@ class FixedGridCalculator:
                 r_vec = p2 - source_point
                 r = np.linalg.norm(r_vec)
                 
-                if r > 1e-12:  # Avoid division by zero
+                if r > EPS:  # Avoid division by zero
                     r_hat = r_vec / r
                     
                     cos1 = np.dot(n1, r_hat)

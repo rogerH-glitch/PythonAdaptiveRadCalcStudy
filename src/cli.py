@@ -14,6 +14,34 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import logging
 
+def _ensure_headless_matplotlib():
+    """
+    Use a headless backend when no display is available (Windows/CI safe).
+    Call this right before importing matplotlib.pyplot if plotting is requested.
+    """
+    try:
+        import matplotlib  # noqa
+    except Exception:
+        # Will be handled later if plotting is requested
+        return
+    # Force Agg on Windows or when DISPLAY is missing
+    try:
+        import matplotlib
+        if (os.name == "nt") or (not os.environ.get("DISPLAY")):
+            matplotlib.use("Agg")  # headless backend
+    except Exception:
+        pass
+
+try:
+    import numpy as np
+except ImportError as e:
+    raise SystemExit("Missing dependency 'numpy'. Run: pip install -r requirements.txt") from e
+
+try:
+    import yaml  # used by YAML mode
+except ImportError as e:
+    raise SystemExit("Missing dependency 'pyyaml'. Run: pip install -r requirements.txt") from e
+
 from .analytical import local_peak_vf_analytic_approx, validate_geometry, get_analytical_info
 
 # Set up logging
@@ -541,6 +569,15 @@ def main_with_args(args: argparse.Namespace) -> int:
         # Set logging level
         if args.verbose:
             logging.getLogger().setLevel(logging.DEBUG)
+        
+        # Handle plotting setup if requested
+        if args.plot:
+            _ensure_headless_matplotlib()
+            try:
+                import matplotlib.pyplot as plt  # noqa
+            except Exception as e:
+                raise SystemExit("Plotting requested but matplotlib is not available. "
+                                 "Run: pip install matplotlib") from e
         
         # Validate arguments
         validate_args(args)

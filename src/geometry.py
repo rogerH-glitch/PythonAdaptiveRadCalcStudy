@@ -157,7 +157,8 @@ class ViewFactorResult:
     
     def __str__(self) -> str:
         """String representation of result."""
-        status = "converged" if self.converged else "not converged"
+        from .constants import STATUS_CONVERGED, STATUS_FAILED
+        status = STATUS_CONVERGED if self.converged else STATUS_FAILED
         return (f"ViewFactorResult(value={self.value:.6f}, "
                 f"uncertainty=±{self.uncertainty:.6f}, "
                 f"status={status})")
