@@ -220,6 +220,51 @@ Default assumptions:
         help='Random seed (default: 42)'
     )
     
+    # Peak locator options
+    peak_group = parser.add_argument_group('Peak locator options')
+    peak_group.add_argument(
+        '--rc-mode',
+        choices=['center', 'grid', 'search'],
+        default='center',
+        help='Receiver peak search mode (default: center)'
+    )
+    peak_group.add_argument(
+        '--rc-grid-n',
+        type=int,
+        default=21,
+        help='Grid resolution for coarse sampling (default: 21)'
+    )
+    peak_group.add_argument(
+        '--rc-search-rel-tol',
+        type=float,
+        default=3e-3,
+        help='Target relative improvement tolerance (default: 3e-3)'
+    )
+    peak_group.add_argument(
+        '--rc-search-max-iters',
+        type=int,
+        default=200,
+        help='Max local-optimizer iterations (default: 200)'
+    )
+    peak_group.add_argument(
+        '--rc-search-multistart',
+        type=int,
+        default=8,
+        help='Number of multi-start seeds (default: 8)'
+    )
+    peak_group.add_argument(
+        '--rc-search-time-limit-s',
+        type=float,
+        default=10.0,
+        help='Wall clock cap for search phase (default: 10.0)'
+    )
+    peak_group.add_argument(
+        '--rc-bounds',
+        choices=['auto', 'explicit'],
+        default='auto',
+        help='Bounds mode (default: auto)'
+    )
+    
     # General options
     parser.add_argument(
         '--verbose', '-v',
@@ -462,139 +507,66 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
     setback = args.setback
     angle = args.angle
     
-    # For now, only analytical and fixedgrid methods are implemented
-    if args.method == 'analytical':
-        # Validate geometry
-        is_valid, error_msg = validate_geometry(em_w, em_h, rc_w, rc_h, setback)
-        if not is_valid:
-            raise ValueError(f"Invalid geometry: {error_msg}")
-        
-        # Check for non-zero angle (not supported yet)
-        if abs(angle) > 1e-6:
-            raise ValueError("Analytical method currently only supports parallel surfaces (angle = 0°)")
-        
-        # Calculate view factor
-        start_time = time.time()
-        vf = local_peak_vf_analytic_approx(em_w, em_h, rc_w, rc_h, setback)
-        calc_time = time.time() - start_time
-        
-        return {
-            'method': 'analytical',
-            'vf': vf,
-            'calc_time': calc_time,
-            'geometry': {
-                'emitter': (em_w, em_h),
-                'receiver': (rc_w, rc_h),
-                'setback': setback,
-                'angle': angle
-            },
-            'info': get_analytical_info()
-        }
+    # Import peak locator
+    from .peak_locator import find_local_peak, create_vf_evaluator
     
-    elif args.method == 'fixedgrid':
-        # Check for non-zero angle (not supported yet)
-        if abs(angle) > 1e-6:
-            raise ValueError("Fixed grid method currently only supports parallel surfaces (angle = 0°)")
-        
-        # Import fixed grid function
-        from .fixed_grid import vf_fixed_grid
-        
-        # Calculate view factor
-        start_time = time.time()
-        result = vf_fixed_grid(
-            em_w, em_h, rc_w, rc_h, setback,
-            grid_nx=args.grid_nx, grid_ny=args.grid_ny, 
-            quadrature=args.quadrature, time_limit_s=args.time_limit_s
-        )
-        calc_time = time.time() - start_time
-        
-        return {
-            'method': 'fixedgrid',
-            'vf': result['vf'],
-            'calc_time': calc_time,
-            'status': result['status'],
-            'samples_emitter': result['samples_emitter'],
-            'samples_receiver': result['samples_receiver'],
-            'geometry': {
-                'emitter': (em_w, em_h),
-                'receiver': (rc_w, rc_h),
-                'setback': setback,
-                'angle': angle
-            },
-            'info': f"Fixed grid {args.grid_nx}×{args.grid_ny}, {args.quadrature} quadrature"
-        }
+    # Create method-specific evaluator
+    method_params = {
+        'rel_tol': getattr(args, 'rel_tol', 3e-3),
+        'abs_tol': getattr(args, 'abs_tol', 1e-6),
+        'max_depth': getattr(args, 'max_depth', 12),
+        'max_cells': getattr(args, 'max_cells', 200000),
+        'min_cell_area_frac': getattr(args, 'min_cell_area_frac', 1e-8),
+        'init_grid': getattr(args, 'init_grid', '4x4'),
+        'grid_nx': getattr(args, 'grid_nx', 100),
+        'grid_ny': getattr(args, 'grid_ny', 100),
+        'quadrature': getattr(args, 'quadrature', 'centroid'),
+        'samples': getattr(args, 'samples', 200000),
+        'target_rel_ci': getattr(args, 'target_rel_ci', 0.02),
+        'max_iters': getattr(args, 'max_iters', 50),
+        'seed': getattr(args, 'seed', 42),
+        'time_limit_s': getattr(args, 'time_limit_s', 60.0)
+    }
     
-    elif args.method == 'adaptive':
-        # Check for non-zero angle (not supported yet)
-        if abs(angle) > 1e-6:
-            raise ValueError("Adaptive method currently only supports parallel surfaces (angle = 0°)")
-        
-        # Import adaptive function
-        from .adaptive import vf_adaptive
-        
-        # Calculate view factor
-        start_time = time.time()
-        result = vf_adaptive(
-            em_w, em_h, rc_w, rc_h, setback,
-            rel_tol=args.rel_tol, abs_tol=args.abs_tol, max_depth=args.max_depth,
-            min_cell_area_frac=args.min_cell_area_frac, max_cells=args.max_cells,
-            time_limit_s=args.time_limit_s, init_grid=args.init_grid
-        )
-        calc_time = time.time() - start_time
-        
-        return {
-            'method': 'adaptive',
-            'vf': result['vf'],
-            'calc_time': calc_time,
-            'status': result['status'],
-            'iterations': result['iterations'],
-            'achieved_tol': result['achieved_tol'],
-            'geometry': {
-                'emitter': (em_w, em_h),
-                'receiver': (rc_w, rc_h),
-                'setback': setback,
-                'angle': angle
-            },
-            'info': f"Adaptive {args.init_grid} init, rel_tol={args.rel_tol:.1e}, abs_tol={args.abs_tol:.1e}"
-        }
+    # Create evaluator function
+    vf_evaluator = create_vf_evaluator(
+        args.method, em_w, em_h, rc_w, rc_h, setback, angle, **method_params
+    )
     
-    elif args.method == 'montecarlo':
-        # Check for non-zero angle (not supported yet)
-        if abs(angle) > 1e-6:
-            raise ValueError("Monte Carlo method currently only supports parallel surfaces (angle = 0°)")
-        
-        # Import montecarlo function
-        from .montecarlo import vf_montecarlo
-        
-        # Calculate view factor
-        start_time = time.time()
-        result = vf_montecarlo(
-            em_w, em_h, rc_w, rc_h, setback,
-            samples=args.samples, target_rel_ci=args.target_rel_ci, 
-            max_iters=args.max_iters, seed=args.seed, time_limit_s=args.time_limit_s,
-            rc_mode="center"
-        )
-        calc_time = time.time() - start_time
-        
-        return {
-            'method': 'montecarlo',
-            'vf': result['vf_mean'],  # Use mean as the primary result
-            'calc_time': calc_time,
-            'status': result['status'],
-            'vf_ci95': result['vf_ci95'],
-            'samples': result['samples'],
-            'geometry': {
-                'emitter': (em_w, em_h),
-                'receiver': (rc_w, rc_h),
-                'setback': setback,
-                'angle': angle
-            },
-            'info': f"Monte Carlo {args.samples:,} samples, target CI={args.target_rel_ci:.3f}, seed={args.seed}"
-        }
+    # Find local peak
+    start_time = time.time()
+    peak_result = find_local_peak(
+        em_w, em_h, rc_w, rc_h, setback, angle, vf_evaluator,
+        rc_mode=args.rc_mode,
+        rc_grid_n=args.rc_grid_n,
+        rc_search_rel_tol=args.rc_search_rel_tol,
+        rc_search_max_iters=args.rc_search_max_iters,
+        rc_search_multistart=args.rc_search_multistart,
+        rc_search_time_limit_s=args.rc_search_time_limit_s,
+        rc_bounds=args.rc_bounds
+    )
+    calc_time = time.time() - start_time
     
-    else:
-        # Placeholder for other methods
-        raise NotImplementedError(f"Method '{args.method}' not yet implemented")
+    # Build result dictionary
+    result = {
+        'method': args.method,
+        'vf': peak_result['vf_peak'],
+        'calc_time': calc_time,
+        'x_peak': peak_result['x_peak'],
+        'y_peak': peak_result['y_peak'],
+        'rc_mode': args.rc_mode,
+        'status': peak_result['status'],
+        'geometry': {
+            'emitter': (em_w, em_h),
+            'receiver': (rc_w, rc_h),
+            'setback': setback,
+            'angle': angle
+        },
+        'search_metadata': peak_result.get('search_metadata', {}),
+        'info': f"{args.method} {args.rc_mode} mode, peak at ({peak_result['x_peak']:.3f}, {peak_result['y_peak']:.3f})"
+    }
+    
+    return result
 
 
 def print_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
@@ -615,11 +587,22 @@ def print_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
     
     print(f"Method: {method.title()}")
     print(f"Local Peak View Factor: {vf:.8f}")
+    print(f"Peak Location: ({result.get('x_peak', 0.0):.3f}, {result.get('y_peak', 0.0):.3f}) m")
+    print(f"RC Mode: {result.get('rc_mode', 'center')}")
     print(f"Calculation Time: {calc_time:.3f} seconds")
     
     if 'info' in result:
         print(f"\nMethod Info:")
         print(f"  {result['info']}")
+    
+    # Show search metadata if available
+    search_metadata = result.get('search_metadata', {})
+    if search_metadata:
+        print(f"\nSearch Details:")
+        print(f"  Evaluations: {search_metadata.get('evaluations', 0)}")
+        print(f"  Search Time: {search_metadata.get('time_s', 0.0):.3f} s")
+        if 'seeds_used' in search_metadata:
+            print(f"  Seeds Used: {search_metadata['seeds_used']}")
     
     print("="*50)
 
@@ -640,50 +623,40 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
     csv_filename = f"{method}.csv"
     csv_path = os.path.join(args.outdir, csv_filename)
     
-    # Extract geometry
+    # Extract geometry and peak information
     geom = result['geometry']
     em_w, em_h = geom['emitter']
     rc_w, rc_h = geom['receiver']
     setback = geom['setback']
     angle = geom['angle']
     vf = result['vf']
+    x_peak = result.get('x_peak', 0.0)
+    y_peak = result.get('y_peak', 0.0)
+    rc_mode = result.get('rc_mode', 'center')
+    status = result.get('status', 'unknown')
     
-    # Write CSV with method-specific fields
+    # Extract search metadata
+    search_metadata = result.get('search_metadata', {})
+    evaluations = search_metadata.get('evaluations', 0)
+    search_time = search_metadata.get('time_s', 0.0)
+    
+    # Write CSV with peak locator fields
     try:
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             
-            if method == 'fixedgrid':
-                # Include grid parameters and status for fixedgrid
-                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
-                               'grid_nx', 'grid_ny', 'vf', 'status', 'samples_emitter', 'samples_receiver'])
-                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, 
-                               args.grid_nx, args.grid_ny, f"{vf:.8f}", 
-                               result.get('status', 'unknown'),
-                               result.get('samples_emitter', 0),
-                               result.get('samples_receiver', 0)])
-            elif method == 'adaptive':
-                # Include adaptive parameters and status
-                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
-                               'vf', 'status', 'iterations', 'achieved_tol', 'rel_tol', 'abs_tol'])
-                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}", 
-                               result.get('status', 'unknown'),
-                               result.get('iterations', 0),
-                               result.get('achieved_tol', 0.0),
-                               args.rel_tol, args.abs_tol])
-            elif method == 'montecarlo':
-                # Include Monte Carlo parameters and status
-                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
-                               'vf_mean', 'vf_ci95', 'status', 'samples', 'target_rel_ci', 'seed'])
-                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}", 
-                               result.get('vf_ci95', 0.0),
-                               result.get('status', 'unknown'),
-                               result.get('samples', 0),
-                               args.target_rel_ci, args.seed])
-            else:
-                # Standard fields for other methods
-                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 'vf'])
-                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}"])
+            # Header row
+            writer.writerow([
+                'method', 'emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle',
+                'rc_mode', 'x_peak', 'y_peak', 'vf_peak', 'status', 'evaluations', 'search_time_s'
+            ])
+            
+            # Data row
+            writer.writerow([
+                method, em_w, em_h, rc_w, rc_h, setback, angle,
+                rc_mode, f"{x_peak:.6f}", f"{y_peak:.6f}", f"{vf:.8f}", 
+                status, evaluations, f"{search_time:.3f}"
+            ])
         
         print(f"\nResults saved to: {csv_path}")
         
@@ -697,33 +670,18 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
         with open(fallback_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             
-            if method == 'fixedgrid':
-                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
-                               'grid_nx', 'grid_ny', 'vf', 'status', 'samples_emitter', 'samples_receiver'])
-                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, 
-                               args.grid_nx, args.grid_ny, f"{vf:.8f}", 
-                               result.get('status', 'unknown'),
-                               result.get('samples_emitter', 0),
-                               result.get('samples_receiver', 0)])
-            elif method == 'adaptive':
-                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
-                               'vf', 'status', 'iterations', 'achieved_tol', 'rel_tol', 'abs_tol'])
-                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}", 
-                               result.get('status', 'unknown'),
-                               result.get('iterations', 0),
-                               result.get('achieved_tol', 0.0),
-                               args.rel_tol, args.abs_tol])
-            elif method == 'montecarlo':
-                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
-                               'vf_mean', 'vf_ci95', 'status', 'samples', 'target_rel_ci', 'seed'])
-                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}", 
-                               result.get('vf_ci95', 0.0),
-                               result.get('status', 'unknown'),
-                               result.get('samples', 0),
-                               args.target_rel_ci, args.seed])
-            else:
-                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 'vf'])
-                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}"])
+            # Header row
+            writer.writerow([
+                'method', 'emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle',
+                'rc_mode', 'x_peak', 'y_peak', 'vf_peak', 'status', 'evaluations', 'search_time_s'
+            ])
+            
+            # Data row
+            writer.writerow([
+                method, em_w, em_h, rc_w, rc_h, setback, angle,
+                rc_mode, f"{x_peak:.6f}", f"{y_peak:.6f}", f"{vf:.8f}", 
+                status, evaluations, f"{search_time:.3f}"
+            ])
         
         print(f"\nResults saved to: {fallback_path}")
 
