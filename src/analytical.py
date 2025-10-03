@@ -19,7 +19,7 @@ def _kernel_parallel(setback: float, r2: np.ndarray) -> np.ndarray:
     """
     r2 = np.maximum(r2, EPS)
     r = np.sqrt(r2)
-    cos = setback / r  # parallel, facing
+    cos = np.maximum(0.0, np.minimum(1.0, setback / r))  # parallel, facing, clamped
     return (cos * cos) / (math.pi * r2)
 
 
@@ -41,6 +41,17 @@ def vf_point_rect_to_point_parallel(
     Returns:
       F_point ∈ [0,1]
     """
+    # Enhanced input validation
+    if not all(x > 0 for x in [em_w, em_h, setback]):
+        raise ValueError("Emitter dimensions and setback must be positive")
+    
+    if not all(x > 0 for x in [nx, ny]):
+        raise ValueError("Grid dimensions must be positive")
+    
+    # Clamp grid sizes to reasonable ranges
+    nx = min(max(nx, 10), 1000)  # 10 to 1000 points
+    ny = min(max(ny, 10), 1000)
+    
     # grid cell centers on emitter
     dx = em_w / nx
     dy = em_h / ny
@@ -56,11 +67,9 @@ def vf_point_rect_to_point_parallel(
     K = _kernel_parallel(setback, r2)  # shape (ny, nx)
     dA = dx * dy
     F = float(np.sum(K) * dA)
-    # clamp to physics bounds
-    if not (F >= 0.0):
-        F = 0.0
-    if F > 1.0:
-        F = 1.0
+    
+    # Clamp to physical bounds
+    F = max(0.0, min(1.0, F))
     return F
 
 

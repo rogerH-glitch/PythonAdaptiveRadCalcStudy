@@ -2,236 +2,203 @@
 Fixed grid view factor calculations.
 
 This module implements view factor calculations using uniform grid
-subdivision with regular quadrature points.
+subdivision with regular quadrature points for local peak view factor computation.
 """
 
 import time
 import numpy as np
-from numpy.polynomial.legendre import leggauss
-from typing import Tuple
+from typing import Dict
 import logging
 
 from .constants import EPS, STATUS_CONVERGED, STATUS_REACHED_LIMITS, STATUS_FAILED
-from .geometry import Rectangle, ViewFactorResult, validate_geometry
 
 logger = logging.getLogger(__name__)
 
 
-class FixedGridCalculator:
-    """Calculator using fixed uniform grid subdivision.
-    
-    Implements view factor calculation by subdividing the emitter surface
-    into a regular grid and using numerical quadrature at each grid point.
+def vf_fixed_grid(
+    em_w: float, em_h: float, rc_w: float, rc_h: float, setback: float,
+    grid_nx: int = 100, grid_ny: int = 100, quadrature: str = "centroid",
+    time_limit_s: float = 60, eps: float = EPS
+) -> Dict:
     """
+    Compute local peak view factor using fixed grid method.
     
-    def __init__(self, nx: int = 100, ny: int = 100, quadrature: str = 'centroid') -> None:
-        """Initialise fixed grid calculator.
-        
-        Args:
-            nx: Number of grid points in x-direction
-            ny: Number of grid points in y-direction  
-            quadrature: Quadrature method ('centroid' or '2x2')
-        """
-        self._nx = nx
-        self._ny = ny
-        self._quadrature = quadrature
-        self._name = "fixed_grid"
-        
-        if quadrature not in ['centroid', '2x2']:
-            raise ValueError(f"Unknown quadrature method: {quadrature}")
+    Samples the receiver on a grid and for each receiver point, integrates
+    over emitter with a fixed emitter grid using centroid quadrature.
     
-    def calculate(self, emitter: Rectangle, receiver: Rectangle) -> ViewFactorResult:
-        """Calculate view factor using fixed grid method.
+    Args:
+        em_w: Emitter width (m)
+        em_h: Emitter height (m) 
+        rc_w: Receiver width (m)
+        rc_h: Receiver height (m)
+        setback: Setback distance (m)
+        grid_nx: Emitter grid points in x-direction
+        grid_ny: Emitter grid points in y-direction
+        quadrature: Quadrature method ("centroid" only for now)
+        time_limit_s: Time limit in seconds
+        eps: Small value for numerical stability
         
-        Args:
-            emitter: Source surface geometry
-            receiver: Target surface geometry
-            
-        Returns:
-            ViewFactorResult with calculated value and metadata
-        """
-        start_time = time.perf_counter()
-        
-        # Validate geometry
-        validate_geometry(emitter, receiver)
-        
-        try:
-            if self._quadrature == 'centroid':
-                view_factor = self._calculate_centroid_quadrature(emitter, receiver)
-            else:  # '2x2'
-                view_factor = self._calculate_2x2_quadrature(emitter, receiver)
-            
-            computation_time = time.perf_counter() - start_time
-            
-            return ViewFactorResult(
-                value=view_factor,
-                uncertainty=0.0,  # No error estimation for fixed grid
-                converged=True,
-                iterations=self._nx * self._ny,
-                computation_time=computation_time,
-                method_used=self._name
-            )
-            
-        except Exception as e:
-            logger.error(f"Fixed grid calculation failed: {e}")
-            raise
+    Returns:
+        Dictionary with:
+        - vf: Maximum pointwise view factor over receiver grid
+        - status: "converged" | "reached_limits" | "failed"
+        - samples_emitter: Number of emitter grid points
+        - samples_receiver: Number of receiver grid points
+        - iterations: Total iterations (receiver points)
+    """
+    start_time = time.perf_counter()
     
-    def _calculate_centroid_quadrature(self, 
-                                     emitter: Rectangle, 
-                                     receiver: Rectangle) -> float:
-        """Calculate using centroid quadrature (1-point per cell).
+    # Enhanced input validation
+    if not all(x > 0 for x in [em_w, em_h, rc_w, rc_h, setback]):
+        return {
+            "vf": 0.0,
+            "status": STATUS_FAILED,
+            "samples_emitter": 0,
+            "samples_receiver": 0,
+            "iterations": 0
+        }
+    
+    if not all(x > 0 for x in [grid_nx, grid_ny]):
+        return {
+            "vf": 0.0,
+            "status": STATUS_FAILED,
+            "samples_emitter": 0,
+            "samples_receiver": 0,
+            "iterations": 0
+        }
+    
+    # Clamp grid sizes to reasonable ranges
+    grid_nx = min(max(grid_nx, 10), 1000)  # 10 to 1000 points
+    grid_ny = min(max(grid_ny, 10), 1000)
+    
+    try:
+        # For parallel surfaces, the local peak typically occurs at receiver centre
+        # Sample receiver grid to find maximum pointwise view factor
+        max_vf = 0.0
         
-        Args:
-            emitter: Source rectangle
-            receiver: Target rectangle
-            
-        Returns:
-            View factor value
-        """
-        total_integral = 0.0
+        # Receiver grid for sampling (coarse grid for efficiency)
+        rc_nx = max(10, grid_nx // 10)  # Coarse receiver grid
+        rc_ny = max(10, grid_ny // 10)
         
         # Grid spacing
-        dx = 1.0 / self._nx
-        dy = 1.0 / self._ny
+        em_dx = em_w / grid_nx
+        em_dy = em_h / grid_ny
+        rc_dx = rc_w / rc_nx
+        rc_dy = rc_h / rc_ny
         
-        # Cell area in parameter space
-        cell_area = dx * dy
+        iterations = 0
+        max_iterations = rc_nx * rc_ny
         
-        for i in range(self._nx):
-            for j in range(self._ny):
-                # Cell centre in parameter space [0,1] × [0,1]
-                s = (i + 0.5) * dx
-                t = (j + 0.5) * dy
+        # Sample receiver points
+        for rc_i in range(rc_nx):
+            for rc_j in range(rc_ny):
+                # Check time limit
+                elapsed = time.perf_counter() - start_time
+                if elapsed > time_limit_s:
+                    return {
+                        "vf": max_vf,
+                        "status": STATUS_REACHED_LIMITS,
+                        "samples_emitter": grid_nx * grid_ny,
+                        "samples_receiver": rc_nx * rc_ny,
+                        "iterations": iterations
+                    }
                 
-                # Convert to world coordinates
-                p1 = emitter.origin + s * emitter.u_vector + t * emitter.v_vector
+                # Check iteration limit
+                if iterations >= max_iterations:
+                    return {
+                        "vf": max_vf,
+                        "status": STATUS_REACHED_LIMITS,
+                        "samples_emitter": grid_nx * grid_ny,
+                        "samples_receiver": rc_nx * rc_ny,
+                        "iterations": iterations
+                    }
                 
-                # Calculate integral over receiver for this source point
-                inner_integral = self._integrate_over_receiver(p1, emitter, receiver)
+                # Receiver point (centre of cell)
+                rc_x = (rc_i + 0.5) * rc_dx - rc_w / 2  # Centre at origin
+                rc_y = (rc_j + 0.5) * rc_dy - rc_h / 2
+                rc_z = setback
                 
-                # Add contribution (weighted by cell area)
-                total_integral += inner_integral * cell_area
+                # Calculate pointwise view factor for this receiver point
+                point_vf = _calculate_pointwise_vf(
+                    rc_x, rc_y, rc_z, em_w, em_h, grid_nx, grid_ny, eps
+                )
+                
+                max_vf = max(max_vf, point_vf)
+                iterations += 1
         
-        # Multiply by physical areas
-        emitter_area = emitter.area
-        receiver_area = receiver.area
+        # Clamp to physical bounds
+        max_vf = max(0.0, min(max_vf, 1.0))
         
-        return (emitter_area * receiver_area * total_integral) / emitter_area
+        return {
+            "vf": max_vf,
+            "status": STATUS_CONVERGED,
+            "samples_emitter": grid_nx * grid_ny,
+            "samples_receiver": rc_nx * rc_ny,
+            "iterations": iterations
+        }
+        
+    except Exception as e:
+        logger.error(f"Fixed grid calculation failed: {e}")
+        return {
+            "vf": 0.0,
+            "status": STATUS_FAILED,
+            "samples_emitter": grid_nx * grid_ny,
+            "samples_receiver": rc_nx * rc_ny,
+            "iterations": 0
+        }
+
+
+def _calculate_pointwise_vf(
+    rc_x: float, rc_y: float, rc_z: float,
+    em_w: float, em_h: float, grid_nx: int, grid_ny: int, eps: float
+) -> float:
+    """
+    Calculate pointwise view factor from receiver point to emitter.
     
-    def _calculate_2x2_quadrature(self, 
-                                emitter: Rectangle, 
-                                receiver: Rectangle) -> float:
-        """Calculate using 2×2 Gauss-Legendre quadrature per cell.
-        
-        Args:
-            emitter: Source rectangle
-            receiver: Target rectangle
-            
-        Returns:
-            View factor value
-        """
-        # Get 2-point Gauss-Legendre quadrature on [0,1]
-        xi, wi = leggauss(2)
-        x_quad = 0.5 * (xi + 1.0)  # Transform to [0,1]
-        w_quad = 0.5 * wi
-        
-        total_integral = 0.0
-        
-        # Grid spacing
-        dx = 1.0 / self._nx
-        dy = 1.0 / self._ny
-        
-        for i in range(self._nx):
-            for j in range(self._ny):
-                # Cell bounds in parameter space
-                s_min = i * dx
-                s_max = (i + 1) * dx
-                t_min = j * dy
-                t_max = (j + 1) * dy
-                
-                # 2×2 quadrature over this cell
-                cell_integral = 0.0
-                for qi in range(2):
-                    for qj in range(2):
-                        # Quadrature point in parameter space
-                        s = s_min + (s_max - s_min) * x_quad[qi]
-                        t = t_min + (t_max - t_min) * x_quad[qj]
-                        
-                        # Convert to world coordinates
-                        p1 = emitter.origin + s * emitter.u_vector + t * emitter.v_vector
-                        
-                        # Calculate integral over receiver
-                        inner_integral = self._integrate_over_receiver(p1, emitter, receiver)
-                        
-                        # Add weighted contribution
-                        weight = w_quad[qi] * w_quad[qj] * dx * dy
-                        cell_integral += inner_integral * weight
-                
-                total_integral += cell_integral
-        
-        # Multiply by physical areas
-        emitter_area = emitter.area
-        receiver_area = receiver.area
-        
-        return (emitter_area * receiver_area * total_integral) / emitter_area
+    Uses differential exchange formula: dF = (cosθ1 cosθ2)/(π r²) dA_emitter
+    For parallel surfaces: cosθ1 = cosθ2 = setback / r
     
-    def _integrate_over_receiver(self, 
-                               source_point: np.ndarray,
-                               emitter: Rectangle,
-                               receiver: Rectangle) -> float:
-        """Integrate view factor kernel over receiver surface.
+    Args:
+        rc_x, rc_y, rc_z: Receiver point coordinates
+        em_w, em_h: Emitter dimensions
+        grid_nx, grid_ny: Emitter grid resolution
+        eps: Small value for numerical stability
         
-        Args:
-            source_point: Point on emitter surface
-            emitter: Source rectangle (for normal vector)
-            receiver: Target rectangle
+    Returns:
+        Pointwise view factor value
+    """
+    # Grid spacing
+    em_dx = em_w / grid_nx
+    em_dy = em_h / grid_ny
+    
+    total_vf = 0.0
+    
+    # Integrate over emitter grid
+    for em_i in range(grid_nx):
+        for em_j in range(grid_ny):
+            # Emitter point (centre of cell)
+            em_x = (em_i + 0.5) * em_dx - em_w / 2  # Centre at origin
+            em_y = (em_j + 0.5) * em_dy - em_h / 2
+            em_z = 0.0
             
-        Returns:
-            Integral of view factor kernel over receiver
-        """
-        # Use fixed quadrature over receiver (moderate resolution)
-        n_recv = 20  # Fixed resolution for receiver integration
-        
-        # Get quadrature points and weights
-        xi, wi = leggauss(n_recv)
-        x_quad = 0.5 * (xi + 1.0)
-        w_quad = 0.5 * wi
-        
-        integral = 0.0
-        
-        # Get surface normals
-        n1 = emitter.normal
-        n2 = receiver.normal
-        
-        # Auto-orient normals to face each other
-        centre_direction = receiver.centroid - emitter.centroid
-        if np.dot(n1, centre_direction) < 0:
-            n1 = -n1
-        if np.dot(n2, -centre_direction) < 0:
-            n2 = -n2
-        
-        for i in range(n_recv):
-            for j in range(n_recv):
-                # Receiver point in parameter space
-                u = x_quad[i]
-                v = x_quad[j]
+            # Distance vector
+            dx = rc_x - em_x
+            dy = rc_y - em_y
+            dz = rc_z - em_z
+            r_squared = dx*dx + dy*dy + dz*dz
+            
+            if r_squared > eps:  # Avoid division by zero
+                r = np.sqrt(r_squared)
                 
-                # Convert to world coordinates
-                p2 = receiver.origin + u * receiver.u_vector + v * receiver.v_vector
+                # For parallel surfaces: cosθ1 = cosθ2 = setback / r
+                # Clamp cos_theta to prevent numerical issues
+                cos_theta = max(0.0, min(1.0, rc_z / r))
                 
-                # Calculate view factor kernel
-                r_vec = p2 - source_point
-                r = np.linalg.norm(r_vec)
+                # View factor kernel: (cosθ1 cosθ2)/(π r²)
+                kernel = (cos_theta * cos_theta) / (np.pi * r_squared)
                 
-                if r > EPS:  # Avoid division by zero
-                    r_hat = r_vec / r
-                    
-                    cos1 = np.dot(n1, r_hat)
-                    cos2 = -np.dot(n2, r_hat)
-                    
-                    if cos1 > 0 and cos2 > 0:
-                        kernel = (cos1 * cos2) / (np.pi * r * r)
-                        weight = w_quad[i] * w_quad[j]
-                        integral += kernel * weight
-        
-        return integral
+                # Cell area contribution
+                cell_area = em_dx * em_dy
+                total_vf += kernel * cell_area
+    
+    return total_vf

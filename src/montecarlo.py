@@ -31,7 +31,7 @@ def _vf_point_mc_center(em_w: float, em_h: float, rc_w: float, rc_h: float, setb
     # guards
     r2 = np.maximum(r2, EPS)
     r  = np.sqrt(r2)
-    cos = setback / r                      # parallel planes
+    cos = np.maximum(0.0, np.minimum(1.0, setback / r))  # parallel planes, clamped
     K   = (cos*cos) / (math.pi * r2)       # == s^2 / (π r^4)
 
     # Integral over emitter = A_em * mean(K) for uniform sampling
@@ -60,23 +60,46 @@ def vf_montecarlo(em_w, em_h, rc_w, rc_h, setback,
                   eps: float = EPS, rc_mode: str = "center", **_):
     """
     Monte Carlo local-peak estimator. Default rc_mode='center'.
+    
+    Args:
+        em_w, em_h: Emitter dimensions (m)
+        rc_w, rc_h: Receiver dimensions (m)
+        setback: Setback distance (m)
+        samples: Maximum number of samples
+        target_rel_ci: Target relative confidence interval
+        max_iters: Maximum number of iterations
+        seed: Random seed
+        time_limit_s: Time limit in seconds
+        eps: Small value for numerical stability
+        rc_mode: Receiver mode (only "center" supported)
+        
+    Returns:
+        Dictionary with vf_mean, vf_ci95, samples, status, iterations
     """
-    # Input validation
-    if em_w <= 0 or em_h <= 0 or rc_w <= 0 or rc_h <= 0 or setback <= 0:
+    # Enhanced input validation
+    if not all(x > 0 for x in [em_w, em_h, rc_w, rc_h, setback]):
         return {
             "vf_mean": 0.0,
             "vf_ci95": 0.0,
             "samples": 0,
-            "status": STATUS_FAILED
+            "status": STATUS_FAILED,
+            "iterations": 0
         }
     
-    if samples <= 0 or target_rel_ci <= 0 or max_iters <= 0:
+    if not all(x > 0 for x in [samples, target_rel_ci, max_iters]):
         return {
             "vf_mean": 0.0,
             "vf_ci95": 0.0,
             "samples": 0,
-            "status": STATUS_FAILED
+            "status": STATUS_FAILED,
+            "iterations": 0
         }
+    
+    # Clamp parameters to reasonable ranges
+    samples = min(max(samples, 1000), 10000000)  # 1K to 10M samples
+    target_rel_ci = max(0.001, min(target_rel_ci, 0.1))  # 0.1% to 10%
+    max_iters = min(max(max_iters, 1), 1000)  # 1 to 1000 iterations
+    time_limit_s = max(0.1, min(time_limit_s, 3600))  # 0.1s to 1 hour
     
     start = time.time()
     rng = np.random.default_rng(seed)
@@ -86,8 +109,18 @@ def vf_montecarlo(em_w, em_h, rc_w, rc_h, setback,
     batch = max(1000, min(samples, 50000))  # Smaller batches for better testing
     acc_vals = []
     iteration = 0
+    
+    # Stagnation detection
+    stagnation_count = 0
+    last_rel_ci = float('inf')
+    stagnation_threshold = 0.1 * target_rel_ci
 
-    while total_samples < samples and (time.time() - start) < time_limit_s and iteration < max_iters:
+    while total_samples < samples and iteration < max_iters:
+        # Check time limit
+        elapsed = time.time() - start
+        if elapsed >= time_limit_s:
+            break
+            
         n = min(batch, samples - total_samples)
         vf_mean, ci95, extras = _vf_point_mc_center(em_w, em_h, rc_w, rc_h, setback, n, rng.integers(0, 2**31-1))
         acc_vals.append(vf_mean)
@@ -100,19 +133,39 @@ def vf_montecarlo(em_w, em_h, rc_w, rc_h, setback,
         # conservative CI over batch means
         ci = 1.96 * (s / math.sqrt(len(acc_vals)))
         rel_ci = (ci / m) if m > 0 else float("inf")
+        
+        # Check for stagnation
+        if rel_ci < last_rel_ci:
+            improvement = last_rel_ci - rel_ci
+            if improvement < stagnation_threshold:
+                stagnation_count += 1
+                if stagnation_count >= 5:  # 5 consecutive steps with minimal improvement
+                    break
+            else:
+                stagnation_count = 0
+        else:
+            stagnation_count += 1
+            if stagnation_count >= 5:
+                break
+        
+        last_rel_ci = rel_ci
 
         if rel_ci <= target_rel_ci:
             return {
                 "vf_mean": float(m),
                 "vf_ci95": float(ci),
                 "samples": int(total_samples),
-                "status": STATUS_CONVERGED
+                "status": STATUS_CONVERGED,
+                "iterations": iteration
             }
 
     # Determine why we stopped
-    if (time.time() - start) >= time_limit_s:
+    elapsed = time.time() - start
+    if elapsed >= time_limit_s:
         status = STATUS_REACHED_LIMITS
     elif iteration >= max_iters:
+        status = STATUS_REACHED_LIMITS
+    elif stagnation_count >= 5:
         status = STATUS_REACHED_LIMITS
     else:
         status = STATUS_REACHED_LIMITS  # Hit sample limit
@@ -120,9 +173,14 @@ def vf_montecarlo(em_w, em_h, rc_w, rc_h, setback,
     m = float(np.mean(acc_vals)) if acc_vals else 0.0
     s = float(np.std(acc_vals, ddof=1)) if len(acc_vals) > 1 else 0.0
     ci = 1.96 * (s / math.sqrt(max(1, len(acc_vals))))
+    
+    # Clamp to physical bounds
+    m = max(0.0, min(m, 1.0))
+    
     return {
         "vf_mean": m,
         "vf_ci95": ci,
         "samples": int(total_samples),
-        "status": status
+        "status": status,
+        "iterations": iteration
     }

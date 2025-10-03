@@ -46,7 +46,7 @@ from .analytical import local_peak_vf_analytic_approx, validate_geometry, get_an
 
 # Set up logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,  # Suppress verbose logs by default
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -723,6 +723,41 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
     return result
 
 
+def print_single_line_summary(result: Dict[str, Any], args: argparse.Namespace) -> None:
+    """
+    Print a single-line summary of calculation results.
+    
+    Args:
+        result: Calculation results dictionary
+        args: Parsed command-line arguments
+    """
+    method = result['method']
+    vf = result['vf']
+    status = result.get('status', 'unknown')
+    calc_time = result['calc_time']
+    
+    # Extract method-specific metrics
+    if method == 'adaptive':
+        iterations = result.get('search_metadata', {}).get('evaluations', 0)
+        depth = result.get('search_metadata', {}).get('depth', 0)
+        cells = result.get('search_metadata', {}).get('cells', 0)
+        achieved_tol = result.get('search_metadata', {}).get('achieved_tol', '')
+        print(f"[method={method}] vf={vf:.6f}, achieved_tol={achieved_tol}, status={status}, depth={depth}, cells={cells}, time={calc_time:.3f}s")
+    elif method == 'fixedgrid':
+        iterations = result.get('search_metadata', {}).get('evaluations', 0)
+        samples_emitter = result.get('search_metadata', {}).get('samples_emitter', 0)
+        samples_receiver = result.get('search_metadata', {}).get('samples_receiver', 0)
+        print(f"[method={method}] vf={vf:.6f}, status={status}, iterations={iterations}, emitter_samples={samples_emitter}, receiver_samples={samples_receiver}, time={calc_time:.3f}s")
+    elif method == 'montecarlo':
+        samples = result.get('search_metadata', {}).get('samples', 0)
+        ci95 = result.get('search_metadata', {}).get('ci95', 0.0)
+        iterations = result.get('search_metadata', {}).get('iterations', 0)
+        print(f"[method={method}] vf={vf:.6f}, ci95={ci95:.6f}, status={status}, samples={samples}, iterations={iterations}, time={calc_time:.3f}s")
+    else:  # analytical
+        iterations = result.get('search_metadata', {}).get('evaluations', 0)
+        print(f"[method={method}] vf={vf:.6f}, status={status}, iterations={iterations}, time={calc_time:.3f}s")
+
+
 def print_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
     """
     Print calculation results to console.
@@ -731,34 +766,39 @@ def print_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
         result: Calculation results dictionary
         args: Parsed command-line arguments
     """
-    print("\n" + "="*50)
-    print("CALCULATION RESULTS")
-    print("="*50)
+    # Always print single-line summary
+    print_single_line_summary(result, args)
     
-    method = result['method']
-    vf = result['vf']
-    calc_time = result['calc_time']
-    
-    print(f"Method: {method.title()}")
-    print(f"Local Peak View Factor: {vf:.8f}")
-    print(f"Peak Location: ({result.get('x_peak', 0.0):.3f}, {result.get('y_peak', 0.0):.3f}) m")
-    print(f"RC Mode: {result.get('rc_mode', 'center')}")
-    print(f"Calculation Time: {calc_time:.3f} seconds")
-    
-    if 'info' in result:
-        print(f"\nMethod Info:")
-        print(f"  {result['info']}")
-    
-    # Show search metadata if available
-    search_metadata = result.get('search_metadata', {})
-    if search_metadata:
-        print(f"\nSearch Details:")
-        print(f"  Evaluations: {search_metadata.get('evaluations', 0)}")
-        print(f"  Search Time: {search_metadata.get('time_s', 0.0):.3f} s")
-        if 'seeds_used' in search_metadata:
-            print(f"  Seeds Used: {search_metadata['seeds_used']}")
-    
-    print("="*50)
+    # Only print detailed results if verbose
+    if args.verbose:
+        print("\n" + "="*50)
+        print("DETAILED RESULTS")
+        print("="*50)
+        
+        method = result['method']
+        vf = result['vf']
+        calc_time = result['calc_time']
+        
+        print(f"Method: {method.title()}")
+        print(f"Local Peak View Factor: {vf:.8f}")
+        print(f"Peak Location: ({result.get('x_peak', 0.0):.3f}, {result.get('y_peak', 0.0):.3f}) m")
+        print(f"RC Mode: {result.get('rc_mode', 'center')}")
+        print(f"Calculation Time: {calc_time:.3f} seconds")
+        
+        if 'info' in result:
+            print(f"\nMethod Info:")
+            print(f"  {result['info']}")
+        
+        # Show search metadata if available
+        search_metadata = result.get('search_metadata', {})
+        if search_metadata:
+            print(f"\nSearch Details:")
+            print(f"  Evaluations: {search_metadata.get('evaluations', 0)}")
+            print(f"  Search Time: {search_metadata.get('time_s', 0.0):.3f} s")
+            if 'seeds_used' in search_metadata:
+                print(f"  Seeds Used: {search_metadata['seeds_used']}")
+        
+        print("="*50)
 
 
 def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:

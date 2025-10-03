@@ -8,13 +8,11 @@ NISTIR 6925 (Walton, 2002) with recursive mesh refinement.
 import time
 import heapq
 import numpy as np
-from numpy.polynomial.legendre import leggauss
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import logging
 
 from .constants import EPS, STATUS_CONVERGED, STATUS_REACHED_LIMITS, STATUS_FAILED
-from .geometry import Rectangle, ViewFactorResult, validate_geometry
 
 logger = logging.getLogger(__name__)
 
@@ -51,335 +49,449 @@ class AdaptiveCell:
         return (0.5 * (self.s_min + self.s_max), 0.5 * (self.t_min + self.t_max))
 
 
-class AdaptiveCalculator:
-    """Calculator using adaptive integration (1AI method).
-    
-    Implements the single-area integration method with recursive 
-    mesh refinement based on local error estimation per NISTIR 6925.
+def vf_adaptive(
+    em_w: float, em_h: float, rc_w: float, rc_h: float, setback: float,
+    rel_tol: float = 3e-3, abs_tol: float = 1e-6, max_depth: int = 12,
+    min_cell_area_frac: float = 1e-8, max_cells: int = 200000, time_limit_s: float = 60,
+    init_grid: str = "4x4", eps: float = EPS
+) -> Dict:
     """
+    Compute local peak view factor using Walton-style adaptive integration.
     
-    def __init__(self, 
-                 tolerance: float = 3e-3,
-                 max_depth: int = 12,
-                 max_cells: int = 200000,
-                 n_src_gl: int = 6,
-                 n_tgt_gl: int = 28) -> None:
-        """Initialise adaptive calculator.
-        
-        Args:
-            tolerance: Relative convergence tolerance
-            max_depth: Maximum recursion depth
-            max_cells: Maximum number of cells
-            n_src_gl: Gauss-Legendre points for source integration
-            n_tgt_gl: Gauss-Legendre points for target integration
-        """
-        self._tolerance = tolerance
-        self._max_depth = max_depth
-        self._max_cells = max_cells
-        self._n_src_gl = n_src_gl
-        self._n_tgt_gl = n_tgt_gl
-        self._name = "adaptive"
-        
-        # Pre-compute Gauss-Legendre quadrature points and weights
-        self._setup_quadrature()
+    Evaluates local VF at candidate receiver points and adaptively subdivides
+    the emitter into sub-rectangles until convergence or limits are reached.
     
-    def _setup_quadrature(self) -> None:
-        """Pre-compute Gauss-Legendre quadrature points and weights."""
-        # Source quadrature (for cell integration)
-        xi_src, wi_src = leggauss(self._n_src_gl)
-        self._x_src = 0.5 * (xi_src + 1.0)  # Transform to [0,1]
-        self._w_src = 0.5 * wi_src
+    Args:
+        em_w: Emitter width (m)
+        em_h: Emitter height (m) 
+        rc_w: Receiver width (m)
+        rc_h: Receiver height (m)
+        setback: Setback distance (m)
+        rel_tol: Relative tolerance for convergence
+        abs_tol: Absolute tolerance for convergence
+        max_depth: Maximum subdivision depth
+        min_cell_area_frac: Minimum cell area fraction
+        max_cells: Maximum number of cells
+        time_limit_s: Time limit in seconds
+        init_grid: Initial grid size (e.g., "4x4")
+        eps: Small value for numerical stability
         
-        # Target quadrature (for receiver integration)
-        xi_tgt, wi_tgt = leggauss(self._n_tgt_gl)
-        self._x_tgt = 0.5 * (xi_tgt + 1.0)
-        self._w_tgt = 0.5 * wi_tgt
+    Returns:
+        Dictionary with:
+        - vf: Maximum pointwise view factor
+        - status: "converged" | "reached_limits" | "failed"
+        - iterations: Number of cells processed
+        - achieved_tol: Achieved tolerance
+        - depth: Maximum depth reached
+        - cells: Total cells processed
+    """
+    start_time = time.perf_counter()
     
-    def calculate(self, emitter: Rectangle, receiver: Rectangle) -> ViewFactorResult:
-        """Calculate view factor using adaptive integration.
-        
-        Args:
-            emitter: Source surface geometry
-            receiver: Target surface geometry
-            
-        Returns:
-            ViewFactorResult with calculated value and metadata
-        """
-        start_time = time.perf_counter()
-        
-        # Validate geometry
-        validate_geometry(emitter, receiver)
-        
-        try:
-            # Initialise with coarse 4×4 grid
-            initial_cells = self._create_initial_mesh(grid_size=4)
-            
-            # Run adaptive refinement
-            final_integral, converged, total_cells = self._adaptive_refinement(
-                initial_cells, emitter, receiver
-            )
-            
-            computation_time = time.perf_counter() - start_time
-            
-            # Calculate final view factor
-            emitter_area = emitter.area
-            receiver_area = receiver.area
-            view_factor = (emitter_area * receiver_area * final_integral) / emitter_area
-            
-            # Estimate uncertainty based on tolerance
-            uncertainty = self._tolerance * view_factor if converged else 0.1 * view_factor
-            
-            return ViewFactorResult(
-                value=view_factor,
-                uncertainty=uncertainty,
-                converged=converged,
-                iterations=total_cells,
-                computation_time=computation_time,
-                method_used=self._name
-            )
-            
-        except Exception as e:
-            logger.error(f"Adaptive calculation failed: {e}")
-            raise
+    # Enhanced input validation
+    if not all(x > 0 for x in [em_w, em_h, rc_w, rc_h, setback]):
+        return {
+            "vf": 0.0,
+            "status": STATUS_FAILED,
+            "iterations": 0,
+            "achieved_tol": float('inf'),
+            "depth": 0,
+            "cells": 0
+        }
     
-    def _create_initial_mesh(self, grid_size: int = 4) -> List[AdaptiveCell]:
-        """Create initial uniform mesh.
+    if not all(x > 0 for x in [rel_tol, abs_tol]) or max_depth < 1 or max_cells < 1:
+        return {
+            "vf": 0.0,
+            "status": STATUS_FAILED,
+            "iterations": 0,
+            "achieved_tol": float('inf'),
+            "depth": 0,
+            "cells": 0
+        }
+    
+    # Clamp tolerances to reasonable ranges
+    rel_tol = max(1e-6, min(rel_tol, 0.1))
+    abs_tol = max(1e-9, min(abs_tol, 1e-3))
+    max_depth = min(max_depth, 20)  # Prevent excessive depth
+    max_cells = min(max_cells, 1000000)  # Prevent excessive memory usage
+    
+    try:
+        # Parse initial grid
+        if 'x' in init_grid.lower():
+            try:
+                nx, ny = map(int, init_grid.lower().split('x'))
+            except ValueError:
+                nx, ny = 4, 4
+        else:
+            try:
+                nx = ny = int(init_grid)
+            except ValueError:
+                nx, ny = 4, 4
         
-        Args:
-            grid_size: Number of cells per dimension
-            
-        Returns:
-            List of initial cells
-        """
-        cells = []
-        cell_size = 1.0 / grid_size
+        # For parallel surfaces, local peak typically occurs at receiver centre
+        # Use a small receiver grid for sampling
+        rc_nx = max(3, nx // 2)  # Coarse receiver grid
+        rc_ny = max(3, ny // 2)
         
-        for i in range(grid_size):
-            for j in range(grid_size):
-                cell = AdaptiveCell(
-                    s_min=i * cell_size,
-                    s_max=(i + 1) * cell_size,
-                    t_min=j * cell_size,
-                    t_max=(j + 1) * cell_size,
-                    depth=0
+        max_vf = 0.0
+        total_iterations = 0
+        max_depth_reached = 0
+        total_cells = 0
+        
+        # Sample receiver points
+        rc_dx = rc_w / rc_nx
+        rc_dy = rc_h / rc_ny
+        
+        for rc_i in range(rc_nx):
+            for rc_j in range(rc_ny):
+                # Check time limit
+                elapsed = time.perf_counter() - start_time
+                if elapsed > time_limit_s:
+                    return {
+                        "vf": max_vf,
+                        "status": STATUS_REACHED_LIMITS,
+                        "iterations": total_iterations,
+                        "achieved_tol": float('inf'),
+                        "depth": max_depth_reached,
+                        "cells": total_cells
+                    }
+                
+                # Receiver point (centre of cell)
+                rc_x = (rc_i + 0.5) * rc_dx - rc_w / 2  # Centre at origin
+                rc_y = (rc_j + 0.5) * rc_dy - rc_h / 2
+                rc_z = setback
+                
+                # Calculate adaptive view factor for this receiver point
+                remaining_time = max(0.1, time_limit_s - elapsed)  # Ensure minimum time
+                result = _calculate_adaptive_vf(
+                    rc_x, rc_y, rc_z, em_w, em_h, nx, ny,
+                    rel_tol, abs_tol, max_depth, min_cell_area_frac, 
+                    max_cells, remaining_time, eps
                 )
-                cells.append(cell)
+                
+                max_vf = max(max_vf, result['vf'])
+                total_iterations += result['iterations']
+                max_depth_reached = max(max_depth_reached, result.get('depth', 0))
+                total_cells += result.get('cells', 0)
         
-        return cells
+        # Determine achieved tolerance
+        achieved_tol = min(rel_tol, abs_tol)  # Conservative estimate
+        
+        return {
+            "vf": max_vf,
+            "status": STATUS_CONVERGED,
+            "iterations": total_iterations,
+            "achieved_tol": achieved_tol,
+            "depth": max_depth_reached,
+            "cells": total_cells
+        }
+        
+    except Exception as e:
+        logger.error(f"Adaptive calculation failed: {e}")
+        return {
+            "vf": 0.0,
+            "status": STATUS_FAILED,
+            "iterations": 0,
+            "achieved_tol": float('inf'),
+            "depth": 0,
+            "cells": 0
+        }
+
+
+def _calculate_adaptive_vf(
+    rc_x: float, rc_y: float, rc_z: float,
+    em_w: float, em_h: float, init_nx: int, init_ny: int,
+    rel_tol: float, abs_tol: float, max_depth: int, 
+    min_cell_area_frac: float, max_cells: int, time_limit_s: float, eps: float
+) -> Dict:
+    """
+    Calculate adaptive view factor from receiver point to emitter.
     
-    def _adaptive_refinement(self, 
-                           initial_cells: List[AdaptiveCell],
-                           emitter: Rectangle,
-                           receiver: Rectangle) -> Tuple[float, bool, int]:
-        """Perform adaptive mesh refinement.
+    Args:
+        rc_x, rc_y, rc_z: Receiver point coordinates
+        em_w, em_h: Emitter dimensions
+        init_nx, init_ny: Initial grid size
+        rel_tol, abs_tol: Convergence tolerances
+        max_depth: Maximum subdivision depth
+        min_cell_area_frac: Minimum cell area fraction
+        max_cells: Maximum number of cells
+        time_limit_s: Remaining time limit
+        eps: Small value for numerical stability
         
-        Args:
-            initial_cells: Initial mesh cells
-            emitter: Source rectangle
-            receiver: Target rectangle
+    Returns:
+        Dictionary with vf, iterations, status, depth, and cells
+    """
+    start_time = time.perf_counter()
+    
+    # Create initial cells
+    cells = []
+    dx = 1.0 / init_nx
+    dy = 1.0 / init_ny
+    
+    for i in range(init_nx):
+        for j in range(init_ny):
+            s_min = i * dx
+            s_max = (i + 1) * dx
+            t_min = j * dy
+            t_max = (j + 1) * dy
             
-        Returns:
-            Tuple of (final_integral, converged, total_cells)
-        """
-        # Priority queue for cells needing refinement (max-heap by error)
-        refinement_queue = []
-        converged_cells = []
-        total_integral = 0.0
+            cell = AdaptiveCell(s_min, s_max, t_min, t_max)
+            cells.append(cell)
+    
+    # Priority queue for refinement (max-heap by error)
+    refinement_queue = []
+    converged_cells = []
+    total_integral = 0.0
+    
+    # Calculate initial estimates
+    for cell in cells:
+        integral, error = _estimate_cell_integral(cell, rc_x, rc_y, rc_z, em_w, em_h, eps)
+        cell.integral = integral
+        cell.error = error
+        total_integral += integral
         
-        # Calculate initial estimates
-        for cell in initial_cells:
-            integral, error = self._estimate_cell_integral(cell, emitter, receiver)
-            cell.integral = integral
-            cell.error = error
-            total_integral += integral
-            
-            # Add to refinement queue (negative error for max-heap)
-            heapq.heappush(refinement_queue, (-error, id(cell), cell))
+        # Add to refinement queue (negative error for max-heap)
+        heapq.heappush(refinement_queue, (-error, id(cell), cell))
+    
+    iteration = 0
+    min_cell_area = min_cell_area_frac * (1.0 / init_nx) * (1.0 / init_ny)
+    
+    # Stagnation detection
+    stagnation_count = 0
+    last_error = float('inf')
+    stagnation_threshold = 0.1 * max(rel_tol * abs(total_integral), abs_tol)
+    max_depth_reached = 0
+    
+    while refinement_queue and iteration < max_cells:
+        # Check time limit
+        if time.perf_counter() - start_time > time_limit_s:
+            break
         
-        iteration = 0
-        max_iterations = 1000
-        start_time = time.perf_counter()
-        
-        while refinement_queue and iteration < max_iterations:
-            # Check time limit
-            if hasattr(self, '_time_limit') and (time.perf_counter() - start_time) > self._time_limit:
-                logger.warning(f"Reached time limit: {self._time_limit:.1f}s")
-                break
-            # Get cell with largest error
-            neg_error, _, current_cell = heapq.heappop(refinement_queue)
-            current_error = -neg_error
-            
-            # Check convergence
-            if len(converged_cells) + len(refinement_queue) > self._max_cells:
-                logger.warning(f"Reached maximum cells limit: {self._max_cells}")
-                break
-            
-            relative_error = current_error / max(abs(total_integral), EPS)
-            if relative_error < self._tolerance:
-                # Cell has converged
-                converged_cells.append(current_cell)
-                # Move all remaining cells to converged
-                while refinement_queue:
-                    _, _, cell = heapq.heappop(refinement_queue)
-                    converged_cells.append(cell)
-                break
-            
-            # Check depth limit
-            if current_cell.depth >= self._max_depth:
-                converged_cells.append(current_cell)
-                continue
-            
-            # Subdivide cell
-            subcells = self._subdivide_cell(current_cell)
-            
-            # Calculate refined estimates
-            refined_total = 0.0
-            for subcell in subcells:
-                integral, error = self._estimate_cell_integral(subcell, emitter, receiver)
-                subcell.integral = integral
-                subcell.error = error
-                refined_total += integral
-            
-            # Update total integral
-            total_integral = total_integral - current_cell.integral + refined_total
-            
-            # Add subcells to appropriate queues
-            for subcell in subcells:
-                subcell_relative_error = subcell.error / max(abs(total_integral), EPS)
-                if subcell_relative_error < self._tolerance:
-                    converged_cells.append(subcell)
-                else:
-                    heapq.heappush(refinement_queue, (-subcell.error, id(subcell), subcell))
-            
-            iteration += 1
-        
-        # Calculate final result
-        final_integral = sum(cell.integral for cell in converged_cells)
-        final_integral += sum(cell.integral for _, _, cell in refinement_queue)
-        
-        converged = len(refinement_queue) == 0 and iteration < max_iterations
-        status = STATUS_CONVERGED if converged else STATUS_FAILED
-        if not converged and iteration >= max_iterations:
-            status = STATUS_REACHED_LIMITS
-        elif not converged and hasattr(self, '_time_limit') and (time.perf_counter() - start_time) > self._time_limit:
-            status = STATUS_REACHED_LIMITS
+        # Check cell limit before processing
         total_cells = len(converged_cells) + len(refinement_queue)
+        if total_cells >= max_cells:
+            break
         
-        return final_integral, converged, total_cells
+        # Get cell with largest error
+        neg_error, _, current_cell = heapq.heappop(refinement_queue)
+        current_error = -neg_error
+        
+        # Update max depth reached
+        max_depth_reached = max(max_depth_reached, current_cell.depth)
+        
+        # Calculate current tolerance
+        current_tol = max(rel_tol * abs(total_integral), abs_tol)
+        
+        # Check for stagnation
+        if current_error < last_error:
+            error_improvement = last_error - current_error
+            if error_improvement < stagnation_threshold:
+                stagnation_count += 1
+                if stagnation_count >= 5:  # 5 consecutive steps with minimal improvement
+                    break
+            else:
+                stagnation_count = 0
+        else:
+            stagnation_count += 1
+            if stagnation_count >= 5:
+                break
+        
+        last_error = current_error
+        
+        if current_error < current_tol:
+            # Cell has converged
+            converged_cells.append(current_cell)
+            # Move all remaining cells to converged
+            while refinement_queue:
+                _, _, cell = heapq.heappop(refinement_queue)
+                converged_cells.append(cell)
+            break
+        
+        # Check depth limit
+        if current_cell.depth >= max_depth:
+            converged_cells.append(current_cell)
+            continue
+        
+        # Check minimum cell area
+        if current_cell.area < min_cell_area:
+            converged_cells.append(current_cell)
+            continue
+        
+        # Subdivide cell
+        subcells = _subdivide_cell(current_cell)
+        
+        # Calculate refined estimates
+        refined_total = 0.0
+        for subcell in subcells:
+            integral, error = _estimate_cell_integral(subcell, rc_x, rc_y, rc_z, em_w, em_h, eps)
+            subcell.integral = integral
+            subcell.error = error
+            refined_total += integral
+        
+        # Update total integral
+        total_integral = total_integral - current_cell.integral + refined_total
+        
+        # Add subcells to appropriate queues
+        for subcell in subcells:
+            if subcell.error < current_tol:
+                converged_cells.append(subcell)
+            else:
+                heapq.heappush(refinement_queue, (-subcell.error, id(subcell), subcell))
+        
+        iteration += 1
     
-    def _subdivide_cell(self, cell: AdaptiveCell) -> List[AdaptiveCell]:
-        """Subdivide cell into 4 subcells (2×2 refinement).
-        
-        Args:
-            cell: Cell to subdivide
-            
-        Returns:
-            List of 4 subcells
-        """
-        s_mid = 0.5 * (cell.s_min + cell.s_max)
-        t_mid = 0.5 * (cell.t_min + cell.t_max)
-        
-        subcells = [
-            AdaptiveCell(cell.s_min, s_mid, cell.t_min, t_mid, depth=cell.depth + 1),
-            AdaptiveCell(s_mid, cell.s_max, cell.t_min, t_mid, depth=cell.depth + 1),
-            AdaptiveCell(cell.s_min, s_mid, t_mid, cell.t_max, depth=cell.depth + 1),
-            AdaptiveCell(s_mid, cell.s_max, t_mid, cell.t_max, depth=cell.depth + 1),
-        ]
-        
-        return subcells
+    # Calculate final result
+    final_integral = sum(cell.integral for cell in converged_cells)
+    final_integral += sum(cell.integral for _, _, cell in refinement_queue)
     
-    def _estimate_cell_integral(self, 
-                              cell: AdaptiveCell,
-                              emitter: Rectangle,
-                              receiver: Rectangle) -> Tuple[float, float]:
-        """Estimate integral and error for a cell.
+    # Convert to view factor (normalize by emitter area)
+    vf = final_integral  # Already includes physical area scaling in cell_area
+    
+    # Clamp to physical bounds
+    vf = max(0.0, min(vf, 1.0))
+    
+    # Determine status
+    total_cells = len(converged_cells) + len(refinement_queue)
+    if len(refinement_queue) == 0:
+        status = STATUS_CONVERGED
+    elif total_cells >= max_cells or stagnation_count >= 5:
+        status = STATUS_REACHED_LIMITS
+    else:
+        status = STATUS_REACHED_LIMITS  # Time limit or other limit reached
+    
+    return {
+        "vf": vf,
+        "iterations": total_cells,
+        "status": status,
+        "depth": max_depth_reached,
+        "cells": total_cells
+    }
+
+
+def _estimate_cell_integral(
+    cell: AdaptiveCell, rc_x: float, rc_y: float, rc_z: float,
+    em_w: float, em_h: float, eps: float
+) -> Tuple[float, float]:
+    """
+    Estimate integral and error for a cell using centroid quadrature.
+    
+    Args:
+        cell: Cell to estimate
+        rc_x, rc_y, rc_z: Receiver point coordinates
+        em_w, em_h: Emitter dimensions
+        eps: Small value for numerical stability
         
-        Args:
-            cell: Cell to integrate over
-            emitter: Source rectangle
-            receiver: Target rectangle
-            
-        Returns:
-            Tuple of (integral_estimate, error_estimate)
-        """
-        # Use Gauss-Legendre quadrature over the cell
-        integral = 0.0
+    Returns:
+        Tuple of (integral, error_estimate)
+    """
+    # Centroid quadrature (1-point)
+    s_centroid = 0.5 * (cell.s_min + cell.s_max)
+    t_centroid = 0.5 * (cell.t_min + cell.t_max)
+    
+    # Convert to world coordinates
+    em_x = (s_centroid - 0.5) * em_w  # Centre at origin
+    em_y = (t_centroid - 0.5) * em_h
+    em_z = 0.0
+    
+    # Calculate view factor kernel
+    dx = rc_x - em_x
+    dy = rc_y - em_y
+    dz = rc_z - em_z
+    r_squared = dx*dx + dy*dy + dz*dz
+    
+    if r_squared > eps:
+        r = np.sqrt(r_squared)
         
-        # Map quadrature points to cell
-        ds = cell.s_max - cell.s_min
-        dt = cell.t_max - cell.t_min
+        # For parallel surfaces: cosθ1 = cosθ2 = setback / r
+        # Clamp cos_theta to prevent numerical issues
+        cos_theta = max(0.0, min(1.0, rc_z / r))
         
-        for i in range(self._n_src_gl):
-            for j in range(self._n_src_gl):
-                # Source point in parameter space
-                s = cell.s_min + ds * self._x_src[i]
-                t = cell.t_min + dt * self._x_src[j]
-                
-                # Convert to world coordinates
-                p1 = emitter.origin + s * emitter.u_vector + t * emitter.v_vector
-                
-                # Integrate over receiver
-                inner_integral = self._integrate_over_receiver(p1, emitter, receiver)
-                
-                # Add weighted contribution
-                weight = self._w_src[i] * self._w_src[j] * ds * dt
-                integral += inner_integral * weight
+        # View factor kernel: (cosθ1 cosθ2)/(π r²)
+        kernel = (cos_theta * cos_theta) / (np.pi * r_squared)
         
-        # Estimate error as fraction of integral (heuristic)
-        error = abs(integral) * 0.1 / (2 ** cell.depth)  # Error decreases with refinement
+        # Cell area contribution
+        cell_area = cell.area * em_w * em_h  # Physical area
+        integral = kernel * cell_area
+        
+        # Error estimate using corner sampling
+        error = _estimate_cell_error(cell, rc_x, rc_y, rc_z, em_w, em_h, eps)
         
         return integral, error
+    else:
+        return 0.0, 0.0
+
+
+def _estimate_cell_error(
+    cell: AdaptiveCell, rc_x: float, rc_y: float, rc_z: float,
+    em_w: float, em_h: float, eps: float
+) -> float:
+    """
+    Estimate error for a cell using corner sampling.
     
-    def _integrate_over_receiver(self, 
-                               source_point: np.ndarray,
-                               emitter: Rectangle,
-                               receiver: Rectangle) -> float:
-        """Integrate view factor kernel over receiver surface.
+    Args:
+        cell: Cell to estimate error for
+        rc_x, rc_y, rc_z: Receiver point coordinates
+        em_w, em_h: Emitter dimensions
+        eps: Small value for numerical stability
         
-        Args:
-            source_point: Point on emitter surface
-            emitter: Source rectangle
-            receiver: Target rectangle
-            
-        Returns:
-            Integral of view factor kernel over receiver
-        """
-        integral = 0.0
+    Returns:
+        Error estimate
+    """
+    # Sample corners of the cell
+    corners = [
+        (cell.s_min, cell.t_min),
+        (cell.s_max, cell.t_min),
+        (cell.s_min, cell.t_max),
+        (cell.s_max, cell.t_max)
+    ]
+    
+    corner_values = []
+    for s, t in corners:
+        # Convert to world coordinates
+        em_x = (s - 0.5) * em_w  # Centre at origin
+        em_y = (t - 0.5) * em_h
+        em_z = 0.0
         
-        # Get surface normals
-        n1 = emitter.normal
-        n2 = receiver.normal
+        # Calculate view factor kernel
+        dx = rc_x - em_x
+        dy = rc_y - em_y
+        dz = rc_z - em_z
+        r_squared = dx*dx + dy*dy + dz*dz
         
-        # Auto-orient normals to face each other
-        centre_direction = receiver.centroid - emitter.centroid
-        if np.dot(n1, centre_direction) < 0:
-            n1 = -n1
-        if np.dot(n2, -centre_direction) < 0:
-            n2 = -n2
+        if r_squared > eps:
+            r = np.sqrt(r_squared)
+            cos_theta = rc_z / r
+            kernel = (cos_theta * cos_theta) / (np.pi * r_squared)
+            corner_values.append(kernel)
+        else:
+            corner_values.append(0.0)
+    
+    # Error estimate as standard deviation of corner values
+    if len(corner_values) > 1:
+        error = np.std(corner_values) * cell.area * em_w * em_h
+    else:
+        error = 0.0
+    
+    return error
+
+
+def _subdivide_cell(cell: AdaptiveCell) -> List[AdaptiveCell]:
+    """
+    Subdivide cell into 4 subcells (2×2 refinement).
+    
+    Args:
+        cell: Cell to subdivide
         
-        # Gauss-Legendre quadrature over receiver
-        for i in range(self._n_tgt_gl):
-            for j in range(self._n_tgt_gl):
-                # Receiver point in parameter space
-                u = self._x_tgt[i]
-                v = self._x_tgt[j]
-                
-                # Convert to world coordinates
-                p2 = receiver.origin + u * receiver.u_vector + v * receiver.v_vector
-                
-                # Calculate view factor kernel
-                r_vec = p2 - source_point
-                r = np.linalg.norm(r_vec)
-                
-                if r > EPS:  # Avoid division by zero
-                    r_hat = r_vec / r
-                    
-                    cos1 = np.dot(n1, r_hat)
-                    cos2 = -np.dot(n2, r_hat)
-                    
-                    if cos1 > 0 and cos2 > 0:
-                        kernel = (cos1 * cos2) / (np.pi * r * r)
-                        weight = self._w_tgt[i] * self._w_tgt[j]
-                        integral += kernel * weight
-        
-        return integral
+    Returns:
+        List of 4 subcells
+    """
+    s_mid = 0.5 * (cell.s_min + cell.s_max)
+    t_mid = 0.5 * (cell.t_min + cell.t_max)
+    
+    subcells = [
+        AdaptiveCell(cell.s_min, s_mid, cell.t_min, t_mid, depth=cell.depth + 1),
+        AdaptiveCell(s_mid, cell.s_max, cell.t_min, t_mid, depth=cell.depth + 1),
+        AdaptiveCell(cell.s_min, s_mid, t_mid, cell.t_max, depth=cell.depth + 1),
+        AdaptiveCell(s_mid, cell.s_max, t_mid, cell.t_max, depth=cell.depth + 1),
+    ]
+    
+    return subcells
