@@ -22,44 +22,43 @@ class AdaptiveCell:
     """Represents a cell in the adaptive mesh.
     
     Attributes:
-        s_min: Minimum s parameter (u-direction)
-        s_max: Maximum s parameter (u-direction)  
-        t_min: Minimum t parameter (v-direction)
-        t_max: Maximum t parameter (v-direction)
-        integral: Estimated integral over this cell
-        error: Estimated error for this cell
+        x0, x1: Cell bounds in x-direction (emitter coordinates)
+        y0, y1: Cell bounds in y-direction (emitter coordinates)
+        est: Estimated integral over this cell
+        err: Estimated error for this cell
         depth: Subdivision depth level
     """
-    s_min: float
-    s_max: float
-    t_min: float
-    t_max: float
-    integral: float = 0.0
-    error: float = 0.0
+    x0: float
+    x1: float
+    y0: float
+    y1: float
+    est: float = 0.0
+    err: float = 0.0
     depth: int = 0
     
     @property
     def area(self) -> float:
-        """Cell area in parameter space."""
-        return (self.s_max - self.s_min) * (self.t_max - self.t_min)
+        """Cell area in physical coordinates."""
+        return (self.x1 - self.x0) * (self.y1 - self.y0)
     
     @property
     def centre(self) -> Tuple[float, float]:
         """Cell centre coordinates."""
-        return (0.5 * (self.s_min + self.s_max), 0.5 * (self.t_min + self.t_max))
+        return (0.5 * (self.x0 + self.x1), 0.5 * (self.y0 + self.y1))
 
 
 def vf_adaptive(
     em_w: float, em_h: float, rc_w: float, rc_h: float, setback: float,
     rel_tol: float = 3e-3, abs_tol: float = 1e-6, max_depth: int = 12,
     min_cell_area_frac: float = 1e-8, max_cells: int = 200000, time_limit_s: float = 60,
-    init_grid: str = "4x4", eps: float = EPS
+    init_grid: str = "4x4", min_cells: int = 16, eps: float = EPS,
+    rc_point: Tuple[float, float] = (0.0, 0.0)
 ) -> Dict:
     """
     Compute local peak view factor using Walton-style adaptive integration.
     
-    Evaluates local VF at candidate receiver points and adaptively subdivides
-    the emitter into sub-rectangles until convergence or limits are reached.
+    Uses proper 1AI refinement with error-driven subdivision based on
+    centroid vs 2x2 quadrature error estimation.
     
     Args:
         em_w: Emitter width (m)
@@ -74,14 +73,16 @@ def vf_adaptive(
         max_cells: Maximum number of cells
         time_limit_s: Time limit in seconds
         init_grid: Initial grid size (e.g., "4x4")
+        min_cells: Minimum number of cells before convergence
         eps: Small value for numerical stability
+        rc_point: Receiver point (rx, ry) for local VF evaluation
         
     Returns:
         Dictionary with:
-        - vf: Maximum pointwise view factor
+        - vf: Pointwise view factor at rc_point
         - status: "converged" | "reached_limits" | "failed"
-        - iterations: Number of cells processed
-        - achieved_tol: Achieved tolerance
+        - iterations: Number of subdivisions performed
+        - achieved_tol: Achieved relative tolerance
         - depth: Maximum depth reached
         - cells: Total cells processed
     """
@@ -113,6 +114,7 @@ def vf_adaptive(
     abs_tol = max(1e-9, min(abs_tol, 1e-3))
     max_depth = min(max_depth, 20)  # Prevent excessive depth
     max_cells = min(max_cells, 1000000)  # Prevent excessive memory usage
+    min_cells = max(min_cells, 16)  # Ensure minimum refinement
     
     try:
         # Parse initial grid
@@ -127,63 +129,18 @@ def vf_adaptive(
             except ValueError:
                 nx, ny = 4, 4
         
-        # For parallel surfaces, local peak typically occurs at receiver centre
-        # Use a small receiver grid for sampling
-        rc_nx = max(3, nx // 2)  # Coarse receiver grid
-        rc_ny = max(3, ny // 2)
+        # Extract receiver point
+        rc_x, rc_y = rc_point
+        rc_z = setback
         
-        max_vf = 0.0
-        total_iterations = 0
-        max_depth_reached = 0
-        total_cells = 0
+        # Calculate adaptive view factor for the specified receiver point
+        result = _calculate_adaptive_vf_walton(
+            rc_x, rc_y, rc_z, em_w, em_h, nx, ny,
+            rel_tol, abs_tol, max_depth, min_cell_area_frac, 
+            max_cells, min_cells, time_limit_s, eps
+        )
         
-        # Sample receiver points
-        rc_dx = rc_w / rc_nx
-        rc_dy = rc_h / rc_ny
-        
-        for rc_i in range(rc_nx):
-            for rc_j in range(rc_ny):
-                # Check time limit
-                elapsed = time.perf_counter() - start_time
-                if elapsed > time_limit_s:
-                    return {
-                        "vf": max_vf,
-                        "status": STATUS_REACHED_LIMITS,
-                        "iterations": total_iterations,
-                        "achieved_tol": float('inf'),
-                        "depth": max_depth_reached,
-                        "cells": total_cells
-                    }
-                
-                # Receiver point (centre of cell)
-                rc_x = (rc_i + 0.5) * rc_dx - rc_w / 2  # Centre at origin
-                rc_y = (rc_j + 0.5) * rc_dy - rc_h / 2
-                rc_z = setback
-                
-                # Calculate adaptive view factor for this receiver point
-                remaining_time = max(0.1, time_limit_s - elapsed)  # Ensure minimum time
-                result = _calculate_adaptive_vf(
-                    rc_x, rc_y, rc_z, em_w, em_h, nx, ny,
-                    rel_tol, abs_tol, max_depth, min_cell_area_frac, 
-                    max_cells, remaining_time, eps
-                )
-                
-                max_vf = max(max_vf, result['vf'])
-                total_iterations += result['iterations']
-                max_depth_reached = max(max_depth_reached, result.get('depth', 0))
-                total_cells += result.get('cells', 0)
-        
-        # Determine achieved tolerance
-        achieved_tol = min(rel_tol, abs_tol)  # Conservative estimate
-        
-        return {
-            "vf": max_vf,
-            "status": STATUS_CONVERGED,
-            "iterations": total_iterations,
-            "achieved_tol": achieved_tol,
-            "depth": max_depth_reached,
-            "cells": total_cells
-        }
+        return result
         
     except Exception as e:
         logger.error(f"Adaptive calculation failed: {e}")
@@ -197,14 +154,17 @@ def vf_adaptive(
         }
 
 
-def _calculate_adaptive_vf(
+def _calculate_adaptive_vf_walton(
     rc_x: float, rc_y: float, rc_z: float,
     em_w: float, em_h: float, init_nx: int, init_ny: int,
     rel_tol: float, abs_tol: float, max_depth: int, 
-    min_cell_area_frac: float, max_cells: int, time_limit_s: float, eps: float
+    min_cell_area_frac: float, max_cells: int, min_cells: int, 
+    time_limit_s: float, eps: float
 ) -> Dict:
     """
-    Calculate adaptive view factor from receiver point to emitter.
+    Calculate adaptive view factor using proper Walton-style 1AI refinement.
+    
+    Uses error-driven subdivision based on centroid vs 2x2 quadrature error estimation.
     
     Args:
         rc_x, rc_y, rc_z: Receiver point coordinates
@@ -214,61 +174,66 @@ def _calculate_adaptive_vf(
         max_depth: Maximum subdivision depth
         min_cell_area_frac: Minimum cell area fraction
         max_cells: Maximum number of cells
-        time_limit_s: Remaining time limit
+        min_cells: Minimum number of cells before convergence
+        time_limit_s: Time limit in seconds
         eps: Small value for numerical stability
         
     Returns:
-        Dictionary with vf, iterations, status, depth, and cells
+        Dictionary with vf, iterations, status, depth, cells, achieved_tol
     """
     start_time = time.perf_counter()
     
-    # Create initial cells
+    # Create initial cells in physical coordinates
     cells = []
-    dx = 1.0 / init_nx
-    dy = 1.0 / init_ny
+    dx = em_w / init_nx
+    dy = em_h / init_ny
     
     for i in range(init_nx):
         for j in range(init_ny):
-            s_min = i * dx
-            s_max = (i + 1) * dx
-            t_min = j * dy
-            t_max = (j + 1) * dy
+            x0 = -em_w/2 + i * dx
+            x1 = -em_w/2 + (i + 1) * dx
+            y0 = -em_h/2 + j * dy
+            y1 = -em_h/2 + (j + 1) * dy
             
-            cell = AdaptiveCell(s_min, s_max, t_min, t_max)
+            cell = AdaptiveCell(x0, x1, y0, y1)
             cells.append(cell)
     
     # Priority queue for refinement (max-heap by error)
     refinement_queue = []
-    converged_cells = []
-    total_integral = 0.0
+    sum_est = 0.0
+    sum_err = 0.0
     
-    # Calculate initial estimates
+    # Calculate initial estimates using proper error estimation
     for cell in cells:
-        integral, error = _estimate_cell_integral(cell, rc_x, rc_y, rc_z, em_w, em_h, eps)
-        cell.integral = integral
-        cell.error = error
-        total_integral += integral
+        est, err = _estimate_cell_integral_walton(cell, rc_x, rc_y, rc_z, eps)
+        cell.est = est
+        cell.err = err
+        sum_est += est
+        sum_err += err
         
         # Add to refinement queue (negative error for max-heap)
-        heapq.heappush(refinement_queue, (-error, id(cell), cell))
+        heapq.heappush(refinement_queue, (-err, id(cell), cell))
     
     iteration = 0
-    min_cell_area = min_cell_area_frac * (1.0 / init_nx) * (1.0 / init_ny)
-    
-    # Stagnation detection
-    stagnation_count = 0
-    last_error = float('inf')
-    stagnation_threshold = 0.1 * max(rel_tol * abs(total_integral), abs_tol)
+    min_cell_area = min_cell_area_frac * em_w * em_h
     max_depth_reached = 0
     
+    # Main refinement loop
     while refinement_queue and iteration < max_cells:
         # Check time limit
         if time.perf_counter() - start_time > time_limit_s:
             break
         
-        # Check cell limit before processing
-        total_cells = len(converged_cells) + len(refinement_queue)
+        # Check cell limit
+        total_cells = len(refinement_queue)
         if total_cells >= max_cells:
+            break
+        
+        # Calculate current tolerance
+        tol = max(rel_tol * abs(sum_est), abs_tol)
+        
+        # Check convergence: error <= tolerance AND minimum cells satisfied
+        if sum_err <= tol and total_cells >= min_cells:
             break
         
         # Get cell with largest error
@@ -278,124 +243,126 @@ def _calculate_adaptive_vf(
         # Update max depth reached
         max_depth_reached = max(max_depth_reached, current_cell.depth)
         
-        # Calculate current tolerance
-        current_tol = max(rel_tol * abs(total_integral), abs_tol)
-        
-        # Check for stagnation
-        if current_error < last_error:
-            error_improvement = last_error - current_error
-            if error_improvement < stagnation_threshold:
-                stagnation_count += 1
-                if stagnation_count >= 5:  # 5 consecutive steps with minimal improvement
-                    break
-            else:
-                stagnation_count = 0
-        else:
-            stagnation_count += 1
-            if stagnation_count >= 5:
-                break
-        
-        last_error = current_error
-        
-        if current_error < current_tol:
-            # Cell has converged
-            converged_cells.append(current_cell)
-            # Move all remaining cells to converged
-            while refinement_queue:
-                _, _, cell = heapq.heappop(refinement_queue)
-                converged_cells.append(cell)
-            break
-        
         # Check depth limit
         if current_cell.depth >= max_depth:
-            converged_cells.append(current_cell)
-            continue
+            # Put cell back in queue (it won't be refined further)
+            heapq.heappush(refinement_queue, (neg_error, id(current_cell), current_cell))
+            break
         
         # Check minimum cell area
         if current_cell.area < min_cell_area:
-            converged_cells.append(current_cell)
-            continue
+            # Put cell back in queue (it won't be refined further)
+            heapq.heappush(refinement_queue, (neg_error, id(current_cell), current_cell))
+            break
         
-        # Subdivide cell
-        subcells = _subdivide_cell(current_cell)
+        # Subdivide cell into 4 subcells
+        subcells = _subdivide_cell_walton(current_cell)
         
-        # Calculate refined estimates
-        refined_total = 0.0
+        # Remove current cell from sum
+        sum_est -= current_cell.est
+        sum_err -= current_cell.err
+        
+        # Calculate estimates for subcells
         for subcell in subcells:
-            integral, error = _estimate_cell_integral(subcell, rc_x, rc_y, rc_z, em_w, em_h, eps)
-            subcell.integral = integral
-            subcell.error = error
-            refined_total += integral
-        
-        # Update total integral
-        total_integral = total_integral - current_cell.integral + refined_total
-        
-        # Add subcells to appropriate queues
-        for subcell in subcells:
-            if subcell.error < current_tol:
-                converged_cells.append(subcell)
-            else:
-                heapq.heappush(refinement_queue, (-subcell.error, id(subcell), subcell))
+            est, err = _estimate_cell_integral_walton(subcell, rc_x, rc_y, rc_z, eps)
+            subcell.est = est
+            subcell.err = err
+            sum_est += est
+            sum_err += err
+            
+            # Add to refinement queue
+            heapq.heappush(refinement_queue, (-err, id(subcell), subcell))
         
         iteration += 1
     
     # Calculate final result
-    final_integral = sum(cell.integral for cell in converged_cells)
-    final_integral += sum(cell.integral for _, _, cell in refinement_queue)
-    
-    # Convert to view factor (normalize by emitter area)
-    vf = final_integral  # Already includes physical area scaling in cell_area
+    final_est = sum_est
     
     # Clamp to physical bounds
-    vf = max(0.0, min(vf, 1.0))
+    vf = max(0.0, min(final_est, 1.0))
+    
+    # Calculate achieved tolerance
+    achieved_tol = sum_err / max(abs(sum_est), 1e-300)
     
     # Determine status
-    total_cells = len(converged_cells) + len(refinement_queue)
-    if len(refinement_queue) == 0:
+    total_cells = len(refinement_queue)
+    if sum_err <= max(rel_tol * abs(sum_est), abs_tol) and total_cells >= min_cells:
         status = STATUS_CONVERGED
-    elif total_cells >= max_cells or stagnation_count >= 5:
-        status = STATUS_REACHED_LIMITS
     else:
-        status = STATUS_REACHED_LIMITS  # Time limit or other limit reached
+        status = STATUS_REACHED_LIMITS
     
     return {
         "vf": vf,
-        "iterations": total_cells,
+        "iterations": iteration,
         "status": status,
         "depth": max_depth_reached,
-        "cells": total_cells
+        "cells": total_cells,
+        "achieved_tol": achieved_tol
     }
 
 
-def _estimate_cell_integral(
-    cell: AdaptiveCell, rc_x: float, rc_y: float, rc_z: float,
-    em_w: float, em_h: float, eps: float
+def _estimate_cell_integral_walton(
+    cell: AdaptiveCell, rc_x: float, rc_y: float, rc_z: float, eps: float
 ) -> Tuple[float, float]:
     """
-    Estimate integral and error for a cell using centroid quadrature.
+    Estimate integral and error for a cell using Walton-style 1AI.
+    
+    Uses centroid estimate vs 2x2 quadrature for error estimation.
     
     Args:
         cell: Cell to estimate
         rc_x, rc_y, rc_z: Receiver point coordinates
-        em_w, em_h: Emitter dimensions
         eps: Small value for numerical stability
         
     Returns:
-        Tuple of (integral, error_estimate)
+        Tuple of (integral_2x2, error_estimate)
     """
-    # Centroid quadrature (1-point)
-    s_centroid = 0.5 * (cell.s_min + cell.s_max)
-    t_centroid = 0.5 * (cell.t_min + cell.t_max)
+    # Centroid estimate (1-point)
+    cx, cy = cell.centre
+    est_centroid = _evaluate_kernel(cx, cy, rc_x, rc_y, rc_z, eps) * cell.area
     
-    # Convert to world coordinates
-    em_x = (s_centroid - 0.5) * em_w  # Centre at origin
-    em_y = (t_centroid - 0.5) * em_h
-    em_z = 0.0
+    # 2x2 estimate (4-point)
+    dx = (cell.x1 - cell.x0) / 2
+    dy = (cell.y1 - cell.y0) / 2
     
-    # Calculate view factor kernel
+    # Four subcell centers
+    subcells = [
+        (cell.x0 + dx/2, cell.y0 + dy/2),  # Bottom-left
+        (cell.x1 - dx/2, cell.y0 + dy/2),  # Bottom-right
+        (cell.x0 + dx/2, cell.y1 - dy/2),  # Top-left
+        (cell.x1 - dx/2, cell.y1 - dy/2),  # Top-right
+    ]
+    
+    est_2x2 = 0.0
+    for sx, sy in subcells:
+        kernel_val = _evaluate_kernel(sx, sy, rc_x, rc_y, rc_z, eps)
+        subcell_area = dx * dy
+        est_2x2 += kernel_val * subcell_area
+    
+    # Error estimate: |I_2x2 - I_centroid|
+    error = abs(est_2x2 - est_centroid)
+    
+    # Return the better estimate (2x2) and error
+    return est_2x2, error
+
+
+def _evaluate_kernel(em_x: float, em_y: float, rc_x: float, rc_y: float, rc_z: float, eps: float) -> float:
+    """
+    Evaluate the view factor kernel at a point.
+    
+    For parallel surfaces: K = s²/(π r⁴) where s = setback, r = distance
+    
+    Args:
+        em_x, em_y: Emitter point coordinates
+        rc_x, rc_y, rc_z: Receiver point coordinates
+        eps: Small value for numerical stability
+        
+    Returns:
+        Kernel value
+    """
     dx = rc_x - em_x
     dy = rc_y - em_y
-    dz = rc_z - em_z
+    dz = rc_z - 0.0  # Emitter is at z=0
     r_squared = dx*dx + dy*dy + dz*dz
     
     if r_squared > eps:
@@ -405,19 +372,12 @@ def _estimate_cell_integral(
         # Clamp cos_theta to prevent numerical issues
         cos_theta = max(0.0, min(1.0, rc_z / r))
         
-        # View factor kernel: (cosθ1 cosθ2)/(π r²)
+        # View factor kernel: (cosθ1 cosθ2)/(π r²) = s²/(π r⁴)
         kernel = (cos_theta * cos_theta) / (np.pi * r_squared)
         
-        # Cell area contribution
-        cell_area = cell.area * em_w * em_h  # Physical area
-        integral = kernel * cell_area
-        
-        # Error estimate using corner sampling
-        error = _estimate_cell_error(cell, rc_x, rc_y, rc_z, em_w, em_h, eps)
-        
-        return integral, error
+        return kernel
     else:
-        return 0.0, 0.0
+        return 0.0
 
 
 def _estimate_cell_error(
@@ -474,9 +434,9 @@ def _estimate_cell_error(
     return error
 
 
-def _subdivide_cell(cell: AdaptiveCell) -> List[AdaptiveCell]:
+def _subdivide_cell_walton(cell: AdaptiveCell) -> List[AdaptiveCell]:
     """
-    Subdivide cell into 4 subcells (2×2 refinement).
+    Subdivide a cell into 4 subcells.
     
     Args:
         cell: Cell to subdivide
@@ -484,14 +444,14 @@ def _subdivide_cell(cell: AdaptiveCell) -> List[AdaptiveCell]:
     Returns:
         List of 4 subcells
     """
-    s_mid = 0.5 * (cell.s_min + cell.s_max)
-    t_mid = 0.5 * (cell.t_min + cell.t_max)
+    x_mid = 0.5 * (cell.x0 + cell.x1)
+    y_mid = 0.5 * (cell.y0 + cell.y1)
     
     subcells = [
-        AdaptiveCell(cell.s_min, s_mid, cell.t_min, t_mid, depth=cell.depth + 1),
-        AdaptiveCell(s_mid, cell.s_max, cell.t_min, t_mid, depth=cell.depth + 1),
-        AdaptiveCell(cell.s_min, s_mid, t_mid, cell.t_max, depth=cell.depth + 1),
-        AdaptiveCell(s_mid, cell.s_max, t_mid, cell.t_max, depth=cell.depth + 1),
+        AdaptiveCell(cell.x0, x_mid, cell.y0, y_mid, depth=cell.depth + 1),
+        AdaptiveCell(x_mid, cell.x1, cell.y0, y_mid, depth=cell.depth + 1),
+        AdaptiveCell(cell.x0, x_mid, y_mid, cell.y1, depth=cell.depth + 1),
+        AdaptiveCell(x_mid, cell.x1, y_mid, cell.y1, depth=cell.depth + 1),
     ]
     
     return subcells

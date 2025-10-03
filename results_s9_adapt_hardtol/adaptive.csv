@@ -1,0 +1,2 @@
+method,emitter_w,emitter_h,receiver_w,receiver_h,setback,angle,rc_mode,x_peak,y_peak,vf_peak,status,evaluations,search_time_s
+adaptive,5.0,2.0,5.0,2.0,1.0,0.0,center,0.000000,0.000000,0.68448075,converged,1,0.347

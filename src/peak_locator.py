@@ -269,20 +269,22 @@ def create_vf_evaluator(
         from .adaptive import vf_adaptive
         
         def evaluator(x: float, y: float) -> Tuple[float, Dict]:
-            # For adaptive method, we need to evaluate at a specific point
-            # This is a simplified version - in practice, we'd need to modify
-            # the adaptive method to accept a specific receiver point
+            # For adaptive method, evaluate at the specific receiver point
             result = vf_adaptive(
                 em_w, em_h, rc_w, rc_h, setback,
                 rel_tol=method_params.get('rel_tol', 3e-3),
                 abs_tol=method_params.get('abs_tol', 1e-6),
                 max_depth=method_params.get('max_depth', 8),
                 max_cells=method_params.get('max_cells', 10000),
-                time_limit_s=method_params.get('time_limit_s', 60.0)
+                min_cells=method_params.get('min_cells', 16),
+                time_limit_s=method_params.get('time_limit_s', 60.0),
+                rc_point=(x, y)
             )
             return result['vf'], {
                 'iterations': result.get('iterations', 0),
-                'achieved_tol': result.get('achieved_tol', 0.0)
+                'achieved_tol': result.get('achieved_tol', 0.0),
+                'cells': result.get('cells', 0),
+                'depth': result.get('depth', 0)
             }
         
         return evaluator

@@ -244,6 +244,12 @@ Default assumptions:
         help='Receiver peak search mode (default: center)'
     )
     peak_group.add_argument(
+        '--min-cells',
+        type=int,
+        default=16,
+        help='Minimum number of cells before convergence (default: 16)'
+    )
+    peak_group.add_argument(
         '--rc-grid-n',
         type=int,
         default=21,
@@ -482,7 +488,7 @@ def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
             # Enhanced CSV headers
             writer.writerow([
                 "id", "method", "vf", "ci95", "expected", "rel_err", "status", 
-                "iterations", "achieved_tol", "notes"
+                "iterations", "achieved_tol", "validation", "validation_rel_err", "notes"
             ])
             
             for case in cases:
@@ -491,7 +497,7 @@ def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
                     if not case["enabled"]:
                         writer.writerow([
                             case.get("id"), case.get("method","adaptive"), "", "", "", "", 
-                            "skipped", "", "", "disabled"
+                            "skipped", "", "", "", "", "disabled"
                         ])
                         continue
                     
@@ -551,6 +557,10 @@ def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
                     if method == 'montecarlo' and 'ci95' in peak_result:
                         ci95 = f"{peak_result['ci95']:.6f}"
                     
+                    # Extract peak coordinates
+                    x_peak = peak_result.get('x_peak', 0.0)
+                    y_peak = peak_result.get('y_peak', 0.0)
+                    
                     # Compare against expected if present
                     expected = kw.get("expected")
                     rel_err = ""
@@ -605,21 +615,35 @@ def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
                         except Exception as plot_error:
                             logger.warning(f"Failed to generate plot for case {kw['id']}: {plot_error}")
                     
+                    # Calculate validation status
+                    validation = ""
+                    validation_rel_err = ""
+                    if expected is not None and expected > 0:
+                        validation_rel_err = rel_err
+                        tolerance_value = case.get("expected", {}).get("tolerance", {}).get("value", 0.01)
+                        rel_err_float = float(rel_err) if rel_err else 0.0
+                        if rel_err_float <= tolerance_value:
+                            validation = "pass"
+                        else:
+                            validation = "out_of_spec"
+                    
                     # Write results to CSV
-                    notes = f"calc_time={calc_time:.3f}s"
+                    x_peak_float = float(x_peak) if x_peak is not None else 0.0
+                    y_peak_float = float(y_peak) if y_peak is not None else 0.0
+                    notes = f"calc_time={calc_time:.3f}s, rc=({x_peak_float:.3f},{y_peak_float:.3f})"
                     if plot_filename:
                         notes += f", plot={plot_filename}"
                     
                     writer.writerow([
                         kw["id"], method, f"{vf:.8f}", ci95, 
                         expected if expected is not None else "", rel_err, status,
-                        iterations, achieved_tol, notes
+                        iterations, achieved_tol, validation, validation_rel_err, notes
                     ])
                     
                 except Exception as e:
                     writer.writerow([
                         case.get("id","<unknown>"), case.get("method","adaptive"), 
-                        "", "", "", "", "failed", "", "", str(e)
+                        "", "", "", "", "failed", "", "", "", "", str(e)
                     ])
                     continue
         
@@ -661,6 +685,7 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
         'max_depth': getattr(args, 'max_depth', 12),
         'max_cells': getattr(args, 'max_cells', 200000),
         'min_cell_area_frac': getattr(args, 'min_cell_area_frac', 1e-8),
+        'min_cells': getattr(args, 'min_cells', 16),
         'init_grid': getattr(args, 'init_grid', '4x4'),
         'grid_nx': getattr(args, 'grid_nx', 100),
         'grid_ny': getattr(args, 'grid_ny', 100),
@@ -716,7 +741,7 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
             'angle': angle
         },
         'search_metadata': peak_result.get('search_metadata', {}),
-        'info': f"{args.method} {args.rc_mode} mode, peak at ({peak_result['x_peak']:.3f}, {peak_result['y_peak']:.3f})",
+        'info': f"{args.method} {args.rc_mode} mode, peak at ({float(peak_result['x_peak']):.3f}, {float(peak_result['y_peak']):.3f})",
         'grid_data': grid_data
     }
     
@@ -781,7 +806,7 @@ def print_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
         
         print(f"Method: {method.title()}")
         print(f"Local Peak View Factor: {vf:.8f}")
-        print(f"Peak Location: ({result.get('x_peak', 0.0):.3f}, {result.get('y_peak', 0.0):.3f}) m")
+        print(f"Peak Location: ({float(result.get('x_peak', 0.0)):.3f}, {float(result.get('y_peak', 0.0)):.3f}) m")
         print(f"RC Mode: {result.get('rc_mode', 'center')}")
         print(f"Calculation Time: {calc_time:.3f} seconds")
         
@@ -824,8 +849,8 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
     setback = geom['setback']
     angle = geom['angle']
     vf = result['vf']
-    x_peak = result.get('x_peak', 0.0)
-    y_peak = result.get('y_peak', 0.0)
+    x_peak = float(result.get('x_peak', 0.0))
+    y_peak = float(result.get('y_peak', 0.0))
     rc_mode = result.get('rc_mode', 'center')
     status = result.get('status', 'unknown')
     
