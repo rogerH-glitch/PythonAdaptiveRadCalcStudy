@@ -489,7 +489,8 @@ def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
             writer.writerow([
                 "id", "method", "vf", "ci95", "expected", "rel_err", "status", 
                 "iterations", "achieved_tol", "validation", "validation_rel_err", 
-                "ref_analytical", "rel_err_to_ref", "attempts", "notes"
+                "ref_analytical", "rel_err_to_ref", "attempts", 
+                "vf_point_center", "vf_receiver_avg", "compare_to", "avg_gt_center", "notes"
             ])
             
             for case in cases:
@@ -498,7 +499,7 @@ def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
                     if not case["enabled"]:
                         writer.writerow([
                             case.get("id"), case.get("method","adaptive"), "", "", "", "", 
-                            "skipped", "", "", "", "", "", "", "", "disabled"
+                            "skipped", "", "", "", "", "", "", "", "", "", "", "", "disabled"
                         ])
                         continue
                     
@@ -629,6 +630,27 @@ def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
                         except Exception:
                             pass  # Skip if analytical fails
                     
+                    # Point vs area-average diagnostics
+                    vf_point_center = vf  # The solver's returned point value at rc=(0,0)
+                    vf_receiver_avg = ""
+                    avg_gt_center = False
+                    compare_to = "point"  # Default
+                    
+                    if angle == 0:  # Only for parallel cases
+                        try:
+                            from .validators import receiver_area_average_point_integrand
+                            vf_receiver_avg = receiver_area_average_point_integrand(
+                                em_w, em_h, rc_w, rc_h, setback, angle_deg=0.0, 
+                                nx_rc=45, ny_rc=19, nx_em=180, ny_em=180
+                            )
+                            avg_gt_center = vf_receiver_avg > vf_point_center * 1.005  # >0.5% higher
+                        except Exception:
+                            pass  # Skip if area-average computation fails
+                    
+                    # Determine comparison type from YAML
+                    if expected is not None:
+                        compare_to = case.get("expected", {}).get("type", "point")
+                    
                     # Auto-retry on validation failure (bounded)
                     attempts = 1
                     if expected is not None and expected > 0:
@@ -674,13 +696,21 @@ def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
                             except Exception:
                                 pass  # Keep original result if retry fails
                     
-                    # Calculate validation status
+                    # Calculate validation status using correct comparison value
                     validation = ""
                     validation_rel_err = ""
                     if expected is not None and expected > 0:
-                        validation_rel_err = rel_err
+                        # Choose comparison value based on YAML type
+                        if compare_to == "area_avg" and vf_receiver_avg != "":
+                            cmp_val = vf_receiver_avg
+                        else:
+                            cmp_val = vf_point_center
+                        
+                        # Compute relative error against expected
+                        rel_err_float = abs(cmp_val - expected) / expected if expected != 0 else 0
+                        validation_rel_err = f"{rel_err_float:.6f}"
                         tolerance_value = case.get("expected", {}).get("tolerance", {}).get("value", 0.01)
-                        rel_err_float = float(rel_err) if rel_err else 0.0
+                        
                         if rel_err_float <= tolerance_value:
                             validation = "pass"
                         else:
@@ -693,17 +723,23 @@ def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
                     if plot_filename:
                         notes += f", plot={plot_filename}"
                     
+                    # Add warning if area-average is significantly higher than center
+                    if avg_gt_center:
+                        notes += ", WARN: avg>center; check geometry/expected type"
+                    
                     writer.writerow([
                         kw["id"], method, f"{vf:.8f}", ci95, 
                         expected if expected is not None else "", rel_err, status,
                         iterations, achieved_tol, validation, validation_rel_err,
-                        ref_analytical, rel_err_to_ref, attempts, notes
+                        ref_analytical, rel_err_to_ref, attempts,
+                        f"{vf_point_center:.8f}", f"{vf_receiver_avg:.8f}" if vf_receiver_avg != "" else "",
+                        compare_to, avg_gt_center, notes
                     ])
                     
                 except Exception as e:
                     writer.writerow([
                         case.get("id","<unknown>"), case.get("method","adaptive"), 
-                        "", "", "", "", "failed", "", "", "", "", "", "", "", str(e)
+                        "", "", "", "", "failed", "", "", "", "", "", "", "", "", "", "", "", str(e)
                     ])
                     continue
         

@@ -107,4 +107,18 @@ cases:
     expected:
       F12: null
       tolerance: { type: relative, value: 3.0e-3 }
+
+  # ---------- Area-average validation test case ----------
+  - id: test_area_avg_validation
+    enabled: true
+    description: Test case for area-average validation diagnostics.
+    geometry:
+      emitter:  { w: 5.0, h: 2.0 }
+      receiver: { w: 5.0, h: 2.0 }
+      setback:  1.0
+      angle:    0
+    expected:
+      F12: 0.70274
+      type: area_avg  # This will validate against area-averaged VF
+      tolerance: { type: relative, value: 5.0e-3 }
 # EXACT FILE CONTENT ENDS
