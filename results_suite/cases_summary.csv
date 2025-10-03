@@ -1,0 +1,10 @@
+id,method,vf,ci95,expected,rel_err,status,iterations,achieved_tol,validation,validation_rel_err,notes
+nist_analytic_obstructed_unit_squares,adaptive,,,,,skipped,,,,,disabled
+hc_5p1x2p1_s0p05,adaptive,0.99813471,,0.998805,0.000671,converged,1,,pass,0.000671,"calc_time=0.014s, rc=(0.000,0.000)"
+hc_5p1x2p1_s1p0,adaptive,0.70255344,,0.70274,0.000265,converged,1,,pass,0.000265,"calc_time=0.003s, rc=(0.000,0.000)"
+hc_5x2_s3p8,adaptive,0.16767111,,0.17735,0.054575,converged,1,,out_of_spec,0.054575,"calc_time=0.000s, rc=(0.000,0.000)"
+hc_20p02x1p05_s0p81,adaptive,0.54354560,,0.54375,0.000376,converged,1,,pass,0.000376,"calc_time=0.030s, rc=(0.000,0.000)"
+hc_20p02x1p05_s1p8,adaptive,0.27924911,,0.27931,0.000218,converged,1,,pass,0.000218,"calc_time=0.014s, rc=(0.000,0.000)"
+hc_21x1_s3p67,adaptive,0.13282800,,0.13285,0.000166,converged,1,,pass,0.000166,"calc_time=0.006s, rc=(0.000,0.000)"
+future_offset_dx0p5,adaptive,,,,,skipped,,,,,disabled
+future_small_rotation_5deg,adaptive,,,,,skipped,,,,,disabled

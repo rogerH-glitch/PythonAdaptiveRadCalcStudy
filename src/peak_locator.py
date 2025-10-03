@@ -70,9 +70,9 @@ def find_local_peak(
             "status": STATUS_CONVERGED,
             "search_metadata": {
                 "time_s": time.perf_counter() - start_time,
-                "iterations": 1,
                 "evaluations": 1,
-                "method": "center"
+                "method": "center",
+                **metadata  # Include method-specific metrics from evaluator
             }
         }
     
@@ -105,16 +105,18 @@ def _coarse_grid_search(
     
     best_vf = -1.0
     best_x, best_y = 0.0, 0.0
+    best_metadata = {}
     evaluations = 0
     
     for x in x_coords:
         for y in y_coords:
-            vf, _ = vf_evaluator(x, y)
+            vf, metadata = vf_evaluator(x, y)
             evaluations += 1
             
             if vf > best_vf:
                 best_vf = vf
                 best_x, best_y = x, y
+                best_metadata = metadata
     
     return {
         "x_peak": best_x,
@@ -123,9 +125,9 @@ def _coarse_grid_search(
         "status": STATUS_CONVERGED,
         "search_metadata": {
             "time_s": time.perf_counter() - start_time,
-            "iterations": 1,
             "evaluations": evaluations,
-            "method": "grid"
+            "method": "grid",
+            **best_metadata  # Include method-specific metrics from best evaluation
         }
     }
 
@@ -142,10 +144,13 @@ def _coarse_to_fine_search(
     y_coords = np.linspace(-rc_h/2, rc_h/2, grid_n)
     
     grid_values = []
+    best_metadata = {}
     for x in x_coords:
         for y in y_coords:
-            vf, _ = vf_evaluator(x, y)
+            vf, metadata = vf_evaluator(x, y)
             grid_values.append((vf, x, y))
+            if vf > grid_values[0][0] if grid_values else True:  # Track best metadata
+                best_metadata = metadata
     
     # Sort by view factor (descending) and select top seeds
     grid_values.sort(key=lambda x: x[0], reverse=True)
@@ -176,7 +181,11 @@ def _coarse_to_fine_search(
             x = max(-rc_w/2, min(rc_w/2, x))
             y = max(-rc_h/2, min(rc_h/2, y))
             
-            vf, _ = vf_evaluator(x, y)
+            vf, metadata = vf_evaluator(x, y)
+            # Store metadata for the best result
+            nonlocal best_metadata
+            if vf > (best_result["vf_peak"] if best_result else -1):
+                best_metadata = metadata
             return -vf  # Minimize negative for maximization
         
         try:
@@ -225,7 +234,8 @@ def _coarse_to_fine_search(
         "iterations": len(seeds),
         "evaluations": total_evaluations,
         "method": "search",
-        "seeds_used": len(seeds)
+        "seeds_used": len(seeds),
+        **best_metadata  # Include method-specific metrics from best evaluation
     }
     
     return best_result

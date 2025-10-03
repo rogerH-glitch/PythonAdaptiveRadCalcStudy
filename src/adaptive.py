@@ -219,12 +219,12 @@ def _calculate_adaptive_vf_walton(
     max_depth_reached = 0
     
     # Main refinement loop
-    while refinement_queue and iteration < max_cells:
+    while refinement_queue:
         # Check time limit
         if time.perf_counter() - start_time > time_limit_s:
             break
         
-        # Check cell limit
+        # Count total cells (leaves in the tree)
         total_cells = len(refinement_queue)
         if total_cells >= max_cells:
             break
@@ -286,7 +286,8 @@ def _calculate_adaptive_vf_walton(
     
     # Determine status
     total_cells = len(refinement_queue)
-    if sum_err <= max(rel_tol * abs(sum_est), abs_tol) and total_cells >= min_cells:
+    final_tol = max(rel_tol * abs(sum_est), abs_tol)
+    if sum_err <= final_tol and total_cells >= min_cells:
         status = STATUS_CONVERGED
     else:
         status = STATUS_REACHED_LIMITS

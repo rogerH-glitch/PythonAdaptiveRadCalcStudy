@@ -72,7 +72,8 @@ def test_cases_runner_basic():
         # Check header
         expected_headers = [
             "id", "method", "vf", "ci95", "expected", "rel_err", "status", 
-            "iterations", "achieved_tol", "validation", "validation_rel_err", "notes"
+            "iterations", "achieved_tol", "validation", "validation_rel_err", 
+            "ref_analytical", "rel_err_to_ref", "attempts", "notes"
         ]
         assert rows[0] == expected_headers
         
@@ -147,7 +148,7 @@ def test_cases_runner_with_plot():
             rows = list(reader)
         
         # Check that notes column contains plot information
-        notes = rows[1][11]  # notes column (index 11 after adding validation columns)
+        notes = rows[1][14]  # notes column (index 14 after adding analytical columns)
         assert 'plot=' in notes
 
 def test_cases_runner_disabled_case():
@@ -210,4 +211,4 @@ def test_cases_runner_disabled_case():
         # Check disabled case
         disabled_row = next(row for row in rows[1:] if row[0] == 'disabled_case')
         assert disabled_row[6] == 'skipped'  # status
-        assert 'disabled' in disabled_row[11]  # notes (index 11 after adding validation columns)
+        assert 'disabled' in disabled_row[14]  # notes (index 14 after adding analytical columns)
