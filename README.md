@@ -39,9 +39,24 @@ This tool calculates the maximum differential (point) view factor over receiver 
 # Run tests:
 python -m pytest -q
 
+# Single calculation examples:
+python main.py --method adaptive --emitter 5.1 2.1 --setback 1
+python main.py --method fixedgrid --emitter 20.02 1.05 --setback 0.81 --plot
+
 # Run validation suite (CSV + plots into ./results):
-python main.py --cases DOCS/validation_cases.yaml --outdir results --plot
+python main.py --cases docs/validation_cases.yaml --method adaptive --plot
 ```
+
+### Understanding View Factor Types
+
+This tool calculates **local peak view factors** - the maximum differential (point) view factor over a receiver surface. This is critical for fire safety engineering where you need to know the worst-case heat flux.
+
+- **Local Peak VF**: Maximum point view factor at any location on the receiver surface
+- **Area-Averaged VF**: Average view factor across the entire receiver surface
+- **For parallel, concentric geometries**: Local peak typically occurs at receiver center
+- **For offset/rotated geometries**: Local peak shifts away from center
+
+The validation runner can compute both types and compare against different expectation types in the YAML cases.
 
 ## Version & reproducibility
 
@@ -116,6 +131,58 @@ python main.py --emitter 5.1 2.1 --setback 1.0 --method fixed_grid --grid-nx 200
 
 # Monte Carlo with more samples
 python main.py --emitter 5.1 2.1 --setback 1.0 --method montecarlo --samples 500000
+```
+
+## Tuning Parameters & Defaults
+
+### Acceptance Target
+- **Adaptive Method**: ±0.3% relative error (≈99.7% confidence) on enabled validation cases
+- **Other Methods**: Vary by method and geometry complexity
+
+### Method-Specific Tuning Knobs
+
+#### Adaptive Integration (`src/adaptive.py`)
+```python
+REL_TOL = 3e-3          # Relative tolerance (default: 0.3%)
+ABS_TOL = 1e-6          # Absolute tolerance (default: 1e-6)
+MAX_DEPTH = 12          # Maximum recursion depth (default: 12)
+MIN_CELL_AREA_FRAC = 1e-8  # Minimum cell area fraction (default: 1e-8)
+MAX_CELLS = 150000      # Maximum number of cells (default: 150,000)
+TIME_LIMIT_S = 60       # Time limit in seconds (default: 60)
+INIT_GRID = "4x4"       # Initial grid size (default: 4×4)
+```
+
+#### Fixed Grid Integration (`src/fixed_grid.py`)
+```python
+GRID_NX = 160           # Grid points in x-direction (default: 160)
+GRID_NY = 160           # Grid points in y-direction (default: 160)
+QUADRATURE = "centroid" # Quadrature method (default: centroid)
+TIME_LIMIT_S = 60       # Time limit in seconds (default: 60)
+```
+
+#### Monte Carlo Sampling (`src/montecarlo.py`)
+```python
+SAMPLES = 300000        # Number of samples (default: 300,000)
+TARGET_REL_CI = 0.02    # Target relative confidence interval (default: 2%)
+MAX_ITERS = 60          # Maximum iterations (default: 60)
+SEED = 42               # Random seed (default: 42)
+TIME_LIMIT_S = 60       # Time limit in seconds (default: 60)
+```
+
+#### Analytical Integration (`src/analytical.py`)
+```python
+ANALYTICAL_NX = 220     # Emitter grid Nx (default: 220)
+ANALYTICAL_NY = 220     # Emitter grid Ny (default: 220)
+```
+
+### Changing Defaults
+To modify defaults, edit the constants at the top of each module file or use CLI arguments:
+```bash
+# Override via CLI
+python main.py --method adaptive --rel-tol 1e-4 --max-cells 200000
+
+# Or edit src/adaptive.py directly
+REL_TOL = 1e-4  # More stringent tolerance
 ```
 
 ## Peak Locator System
@@ -277,8 +344,9 @@ The tool includes validation against established benchmarks:
 ### NISTIR 6925 Reference Cases
 
 - **Obstructed Case**: Unit squares with 0.5×0.5 occluders
-- **Reference Value**: F₁,₂ = 0.11562061 (analytical)
-- **Tolerance**: Within ±0.3% for adaptive method
+  - **Status**: Disabled in validation suite until occluder support is implemented
+  - **Reference Value**: F₁,₂ = 0.11562061 (analytical)
+  - **Tolerance**: Within ±0.3% for adaptive method when enabled
 
 ### User Hand-Calculation Cases
 
