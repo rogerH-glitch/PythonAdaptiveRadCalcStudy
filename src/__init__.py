@@ -1,4 +1,4 @@
-"""
+﻿"""
 Radiation View Factor Validation Tool
 
 A local Python tool for calculating local peak view factors between rectangular 
