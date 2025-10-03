@@ -452,53 +452,180 @@ def print_parsed_args(args: argparse.Namespace) -> None:
     print("="*50)
 
 
-def run_cases(cases_path: str, outdir: str) -> int:
+def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
     """Run validation cases from YAML file and generate summary CSV.
     
     Args:
         cases_path: Path to YAML cases file
         outdir: Output directory for results
+        plot: Whether to generate plots
         
     Returns:
         Exit code (0 for success, non-zero for error)
     """
     from .io_yaml import load_cases, validate_case_schema, coerce_case_to_cli_kwargs
+    from .peak_locator import find_local_peak, create_vf_evaluator
     
     try:
         cases = load_cases(cases_path)
         os.makedirs(outdir, exist_ok=True)
+        
+        # Create plots directory if plotting is requested
+        if plot:
+            plots_dir = os.path.join(outdir, "plots")
+            os.makedirs(plots_dir, exist_ok=True)
+        
         summary_csv = os.path.join(outdir, "cases_summary.csv")
         
         with open(summary_csv, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["id","method","vf","expected","rel_err","status","notes"])
+            # Enhanced CSV headers
+            writer.writerow([
+                "id", "method", "vf", "ci95", "expected", "rel_err", "status", 
+                "iterations", "achieved_tol", "notes"
+            ])
             
             for case in cases:
                 try:
                     validate_case_schema(case)
                     if not case["enabled"]:
-                        writer.writerow([case.get("id"), case.get("method","adaptive"), "", "", "", "skipped", "disabled"])
+                        writer.writerow([
+                            case.get("id"), case.get("method","adaptive"), "", "", "", "", 
+                            "skipped", "", "", "disabled"
+                        ])
                         continue
+                    
                     kw = coerce_case_to_cli_kwargs(case)
+                    
+                    # Extract geometry and method parameters
+                    em_w, em_h = kw["emitter"]
+                    rc_w, rc_h = kw["receiver"]
+                    setback = kw["setback"]
+                    angle = kw["angle"]
+                    method = kw["method"]
+                    
+                    # Apply method-specific overrides from case
+                    overrides = kw.get("overrides", {})
+                    
+                    # Create method-specific evaluator
+                    method_params = {
+                        'analytical_nx': overrides.get('analytical_nx', 240),
+                        'analytical_ny': overrides.get('analytical_ny', 240),
+                        'rel_tol': overrides.get('rel_tol', 3e-3),
+                        'abs_tol': overrides.get('abs_tol', 1e-6),
+                        'max_depth': overrides.get('max_depth', 12),
+                        'max_cells': overrides.get('max_cells', 200000),
+                        'min_cell_area_frac': overrides.get('min_cell_area_frac', 1e-8),
+                        'init_grid': overrides.get('init_grid', '4x4'),
+                        'grid_nx': overrides.get('grid_nx', 100),
+                        'grid_ny': overrides.get('grid_ny', 100),
+                        'quadrature': overrides.get('quadrature', 'centroid'),
+                        'samples': overrides.get('samples', 200000),
+                        'target_rel_ci': overrides.get('target_rel_ci', 0.02),
+                        'max_iters': overrides.get('max_iters', 50),
+                        'seed': overrides.get('seed', 42),
+                        'time_limit_s': overrides.get('time_limit_s', 60.0)
+                    }
+                    
+                    # Create evaluator function
+                    vf_evaluator = create_vf_evaluator(
+                        method, em_w, em_h, rc_w, rc_h, setback, angle, **method_params
+                    )
+                    
+                    # Find local peak (use center mode for cases)
+                    start_time = time.time()
+                    peak_result = find_local_peak(
+                        em_w, em_h, rc_w, rc_h, setback, angle, vf_evaluator,
+                        rc_mode='center'  # Use center mode for batch processing
+                    )
+                    calc_time = time.time() - start_time
+                    
+                    # Extract results
+                    vf = peak_result['vf_peak']
+                    status = peak_result['status']
+                    iterations = peak_result.get('search_metadata', {}).get('evaluations', 0)
+                    achieved_tol = peak_result.get('search_metadata', {}).get('achieved_tol', '')
+                    
+                    # For Monte Carlo, extract CI if available
+                    ci95 = ""
+                    if method == 'montecarlo' and 'ci95' in peak_result:
+                        ci95 = f"{peak_result['ci95']:.6f}"
+                    
+                    # Compare against expected if present
+                    expected = kw.get("expected")
+                    rel_err = ""
+                    if expected is not None and expected != "":
+                        rel_err = f"{abs(vf - expected)/expected:.6f}" if expected != 0 else ""
+                    
+                    # Generate plot if requested
+                    plot_filename = ""
+                    if plot:
+                        try:
+                            from .plotting import create_heatmap_plot
+                            # Generate grid data for plotting
+                            from .plotting import generate_grid_data_for_plotting
+                            grid_data = generate_grid_data_for_plotting(
+                                em_w, em_h, rc_w, rc_h, setback, angle,
+                                method, method_params, 21  # Use 21x21 grid for plots
+                            )
+                            
+                            # Create result dict for plotting
+                            result = {
+                                'method': method,
+                                'vf': vf,
+                                'x_peak': peak_result['x_peak'],
+                                'y_peak': peak_result['y_peak'],
+                                'rc_mode': 'center',
+                                'status': status,
+                                'geometry': {
+                                    'emitter': (em_w, em_h),
+                                    'receiver': (rc_w, rc_h),
+                                    'setback': setback,
+                                    'angle': angle
+                                },
+                                'grid_data': grid_data
+                            }
+                            
+                            # Create mock args for plotting
+                            class MockArgs:
+                                def __init__(self):
+                                    self.outdir = plots_dir
+                                    self.plot = True
+                            
+                            mock_args = MockArgs()
+                            plot_filename = f"{kw['id']}_{method}.png"
+                            create_heatmap_plot(result, mock_args, grid_data)
+                            
+                            # Rename the plot file to use case-specific name
+                            old_plot_path = os.path.join(plots_dir, f"{method}_peak_heatmap.png")
+                            new_plot_path = os.path.join(plots_dir, plot_filename)
+                            if os.path.exists(old_plot_path):
+                                os.rename(old_plot_path, new_plot_path)
+                            
+                        except Exception as plot_error:
+                            logger.warning(f"Failed to generate plot for case {kw['id']}: {plot_error}")
+                    
+                    # Write results to CSV
+                    notes = f"calc_time={calc_time:.3f}s"
+                    if plot_filename:
+                        notes += f", plot={plot_filename}"
+                    
+                    writer.writerow([
+                        kw["id"], method, f"{vf:.8f}", ci95, 
+                        expected if expected is not None else "", rel_err, status,
+                        iterations, achieved_tol, notes
+                    ])
+                    
                 except Exception as e:
-                    writer.writerow([case.get("id","<unknown>"), case.get("method","adaptive"), "", "", "", "invalid", str(e)])
+                    writer.writerow([
+                        case.get("id","<unknown>"), case.get("method","adaptive"), 
+                        "", "", "", "", "failed", "", "", str(e)
+                    ])
                     continue
-
-                # Placeholder solve (replace in later steps)
-                # For now, produce a deterministic dummy vf
-                start = time.time()
-                vf = 0.123456
-                status = "pending"
-                
-                # Compare against expected if present
-                expected = kw.get("expected")
-                rel_err = ""
-                if expected is not None:
-                    rel_err = abs(vf - expected)/expected if expected != 0 else ""
-                
-                writer.writerow([kw["id"], kw["method"], f"{vf:.8f}", expected if expected is not None else "", rel_err, status, "placeholder"])
         
         print(f"Wrote: {summary_csv}")
+        if plot:
+            print(f"Plots saved to: {plots_dir}")
         return 0
         
     except Exception as e:
@@ -741,7 +868,7 @@ def main_with_args(args: argparse.Namespace) -> int:
         
         # If using cases file, run cases and exit
         if args.cases:
-            return run_cases(args.cases, str(args.outdir))
+            return run_cases(args.cases, str(args.outdir), plot=args.plot)
         
         # Normalize arguments and apply defaults for single case
         args = normalize_args(args)
