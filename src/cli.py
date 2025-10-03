@@ -564,6 +564,15 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
     )
     calc_time = time.time() - start_time
     
+    # Generate grid data for plotting if requested
+    grid_data = None
+    if args.plot and args.rc_mode in ['grid', 'search']:
+        from .plotting import generate_grid_data_for_plotting
+        grid_data = generate_grid_data_for_plotting(
+            em_w, em_h, rc_w, rc_h, setback, angle,
+            args.method, method_params, args.rc_grid_n
+        )
+    
     # Build result dictionary
     result = {
         'method': args.method,
@@ -580,7 +589,8 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
             'angle': angle
         },
         'search_metadata': peak_result.get('search_metadata', {}),
-        'info': f"{args.method} {args.rc_mode} mode, peak at ({peak_result['x_peak']:.3f}, {peak_result['y_peak']:.3f})"
+        'info': f"{args.method} {args.rc_mode} mode, peak at ({peak_result['x_peak']:.3f}, {peak_result['y_peak']:.3f})",
+        'grid_data': grid_data
     }
     
     return result
@@ -745,6 +755,11 @@ def main_with_args(args: argparse.Namespace) -> int:
         # Print and save results
         print_results(result, args)
         save_results(result, args)
+        
+        # Generate plots if requested
+        if args.plot:
+            from .plotting import create_heatmap_plot
+            create_heatmap_plot(result, args, result.get('grid_data'))
         
         return 0
         

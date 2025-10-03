@@ -105,6 +105,126 @@ python main.py --emitter 5.1 2.1 --setback 1.0 --method fixed_grid --grid-nx 200
 python main.py --emitter 5.1 2.1 --setback 1.0 --method montecarlo --samples 500000
 ```
 
+## Peak Locator System
+
+### Overview
+
+The tool includes an advanced **peak locator system** that finds the exact location on the receiver where the point view factor is maximized. This is crucial for general geometries where the peak may not occur at the receiver center.
+
+### Key Insight
+
+⚠️ **Important**: The local-peak view factor does NOT necessarily occur at the receiver center. This is only true for the special case of parallel, concentric (center-aligned) emitter/receiver with no occluders. For off-center offsets, rotations, aspect-ratio extremes, or occluders, the local peak shifts.
+
+### Peak Search Modes
+
+#### 1. Center Mode (Default)
+```bash
+# Fast path for concentric parallel cases
+python main.py --method analytical --emitter 5.1 2.1 --setback 1.0 --rc-mode center
+```
+- **Use case**: Concentric parallel geometries
+- **Performance**: Fastest (single evaluation)
+- **Accuracy**: Exact for center-aligned cases
+
+#### 2. Grid Mode
+```bash
+# Coarse grid sampling for exploration
+python main.py --method analytical --emitter 5.1 2.1 --setback 1.0 --rc-mode grid --rc-grid-n 21
+```
+- **Use case**: Quick exploration of view factor distribution
+- **Performance**: Fast (N×N evaluations)
+- **Accuracy**: Limited by grid resolution
+
+#### 3. Search Mode
+```bash
+# Full coarse-to-fine optimization
+python main.py --method analytical --emitter 5.1 2.1 --setback 1.0 --rc-mode search --rc-grid-n 21 --rc-search-multistart 8
+```
+- **Use case**: General geometries, non-concentric cases
+- **Performance**: Slower but most accurate
+- **Accuracy**: Finds true local peak with high precision
+
+### Peak Locator Parameters
+
+```bash
+# Grid resolution for coarse sampling
+--rc-grid-n 21                    # Default: 21 (21×21 grid)
+
+# Search optimization parameters
+--rc-search-rel-tol 3e-3          # Relative improvement tolerance
+--rc-search-max-iters 200         # Max local optimizer iterations
+--rc-search-multistart 8          # Number of multi-start seeds
+--rc-search-time-limit-s 10.0     # Wall clock time limit
+
+# Analytical method grid density
+--analytical-nx 240               # Emitter grid Nx
+--analytical-ny 240               # Emitter grid Ny
+```
+
+### Peak Locator Output
+
+The peak locator provides detailed information about the search process:
+
+```
+==================================================
+CALCULATION RESULTS
+==================================================
+Method: Analytical
+Local Peak View Factor: 0.70275158
+Peak Location: (0.000, 0.000) m
+RC Mode: search
+Calculation Time: 0.526 seconds
+
+Search Details:
+  Evaluations: 121
+  Search Time: 0.526 s
+  Seeds Used: 8
+==================================================
+```
+
+### Heatmap Visualization
+
+When using `--plot` with grid or search modes, the tool generates heatmap visualizations:
+
+```bash
+# Generate heatmap showing view factor distribution
+python main.py --method analytical --emitter 5.1 2.1 --setback 1.0 --rc-mode grid --plot
+```
+
+**Plot Features**:
+- **Left panel**: Geometry overview showing emitter/receiver positions
+- **Right panel**: View factor heatmap with peak location marked
+- **Peak indicator**: Red star showing exact peak location
+- **Color scale**: Viridis colormap for clear visualization
+
+### Example Use Cases
+
+#### Concentric Parallel (Peak at Center)
+```bash
+python main.py --method analytical --emitter 5.1 2.1 --receiver 5.1 2.1 --setback 1.0 --rc-mode search
+# Result: Peak at (0.000, 0.000) - receiver center
+```
+
+#### Offset Receiver (Peak Shifts)
+```bash
+python main.py --method analytical --emitter 5.1 2.1 --receiver 3.0 1.5 --setback 1.0 --rc-mode search
+# Result: Peak shifts toward the nearer edge
+```
+
+#### Different Methods
+```bash
+# All methods support peak location
+python main.py --method adaptive --emitter 5.1 2.1 --setback 1.0 --rc-mode search
+python main.py --method fixedgrid --emitter 5.1 2.1 --setback 1.0 --rc-mode search
+python main.py --method montecarlo --emitter 5.1 2.1 --setback 1.0 --rc-mode search
+```
+
+### Analytical (Point) Evaluator
+
+The analytical backend computes the **point** view factor by integrating the kernel over the emitter for a specified receiver point `(rx, ry)`.  
+Defaults: parallel, concentric (angle=0). Use `--analytical-nx/--analytical-ny` to trade accuracy for time.  
+When using `rc_mode=search`, the peak locator probes multiple `(x,y)` on the receiver with this point evaluator.
+
 ## Output Examples
 
 ### Console Output
