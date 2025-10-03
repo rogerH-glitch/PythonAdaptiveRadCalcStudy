@@ -462,7 +462,7 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
     setback = args.setback
     angle = args.angle
     
-    # For now, only analytical method is implemented
+    # For now, only analytical and fixedgrid methods are implemented
     if args.method == 'analytical':
         # Validate geometry
         is_valid, error_msg = validate_geometry(em_w, em_h, rc_w, rc_h, setback)
@@ -489,6 +489,107 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
                 'angle': angle
             },
             'info': get_analytical_info()
+        }
+    
+    elif args.method == 'fixedgrid':
+        # Check for non-zero angle (not supported yet)
+        if abs(angle) > 1e-6:
+            raise ValueError("Fixed grid method currently only supports parallel surfaces (angle = 0°)")
+        
+        # Import fixed grid function
+        from .fixed_grid import vf_fixed_grid
+        
+        # Calculate view factor
+        start_time = time.time()
+        result = vf_fixed_grid(
+            em_w, em_h, rc_w, rc_h, setback,
+            grid_nx=args.grid_nx, grid_ny=args.grid_ny, 
+            quadrature=args.quadrature, time_limit_s=args.time_limit_s
+        )
+        calc_time = time.time() - start_time
+        
+        return {
+            'method': 'fixedgrid',
+            'vf': result['vf'],
+            'calc_time': calc_time,
+            'status': result['status'],
+            'samples_emitter': result['samples_emitter'],
+            'samples_receiver': result['samples_receiver'],
+            'geometry': {
+                'emitter': (em_w, em_h),
+                'receiver': (rc_w, rc_h),
+                'setback': setback,
+                'angle': angle
+            },
+            'info': f"Fixed grid {args.grid_nx}×{args.grid_ny}, {args.quadrature} quadrature"
+        }
+    
+    elif args.method == 'adaptive':
+        # Check for non-zero angle (not supported yet)
+        if abs(angle) > 1e-6:
+            raise ValueError("Adaptive method currently only supports parallel surfaces (angle = 0°)")
+        
+        # Import adaptive function
+        from .adaptive import vf_adaptive
+        
+        # Calculate view factor
+        start_time = time.time()
+        result = vf_adaptive(
+            em_w, em_h, rc_w, rc_h, setback,
+            rel_tol=args.rel_tol, abs_tol=args.abs_tol, max_depth=args.max_depth,
+            min_cell_area_frac=args.min_cell_area_frac, max_cells=args.max_cells,
+            time_limit_s=args.time_limit_s, init_grid=args.init_grid
+        )
+        calc_time = time.time() - start_time
+        
+        return {
+            'method': 'adaptive',
+            'vf': result['vf'],
+            'calc_time': calc_time,
+            'status': result['status'],
+            'iterations': result['iterations'],
+            'achieved_tol': result['achieved_tol'],
+            'geometry': {
+                'emitter': (em_w, em_h),
+                'receiver': (rc_w, rc_h),
+                'setback': setback,
+                'angle': angle
+            },
+            'info': f"Adaptive {args.init_grid} init, rel_tol={args.rel_tol:.1e}, abs_tol={args.abs_tol:.1e}"
+        }
+    
+    elif args.method == 'montecarlo':
+        # Check for non-zero angle (not supported yet)
+        if abs(angle) > 1e-6:
+            raise ValueError("Monte Carlo method currently only supports parallel surfaces (angle = 0°)")
+        
+        # Import montecarlo function
+        from .montecarlo import vf_montecarlo
+        
+        # Calculate view factor
+        start_time = time.time()
+        result = vf_montecarlo(
+            em_w, em_h, rc_w, rc_h, setback,
+            samples=args.samples, target_rel_ci=args.target_rel_ci, 
+            max_iters=args.max_iters, seed=args.seed, time_limit_s=args.time_limit_s,
+            rc_mode="center"
+        )
+        calc_time = time.time() - start_time
+        
+        return {
+            'method': 'montecarlo',
+            'vf': result['vf_mean'],  # Use mean as the primary result
+            'calc_time': calc_time,
+            'status': result['status'],
+            'vf_ci95': result['vf_ci95'],
+            'samples': result['samples'],
+            'geometry': {
+                'emitter': (em_w, em_h),
+                'receiver': (rc_w, rc_h),
+                'setback': setback,
+                'angle': angle
+            },
+            'info': f"Monte Carlo {args.samples:,} samples, target CI={args.target_rel_ci:.3f}, seed={args.seed}"
         }
     
     else:
@@ -547,13 +648,84 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
     angle = geom['angle']
     vf = result['vf']
     
-    # Write CSV
-    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 'vf'])
-        writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}"])
-    
-    print(f"\nResults saved to: {csv_path}")
+    # Write CSV with method-specific fields
+    try:
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            
+            if method == 'fixedgrid':
+                # Include grid parameters and status for fixedgrid
+                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
+                               'grid_nx', 'grid_ny', 'vf', 'status', 'samples_emitter', 'samples_receiver'])
+                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, 
+                               args.grid_nx, args.grid_ny, f"{vf:.8f}", 
+                               result.get('status', 'unknown'),
+                               result.get('samples_emitter', 0),
+                               result.get('samples_receiver', 0)])
+            elif method == 'adaptive':
+                # Include adaptive parameters and status
+                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
+                               'vf', 'status', 'iterations', 'achieved_tol', 'rel_tol', 'abs_tol'])
+                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}", 
+                               result.get('status', 'unknown'),
+                               result.get('iterations', 0),
+                               result.get('achieved_tol', 0.0),
+                               args.rel_tol, args.abs_tol])
+            elif method == 'montecarlo':
+                # Include Monte Carlo parameters and status
+                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
+                               'vf_mean', 'vf_ci95', 'status', 'samples', 'target_rel_ci', 'seed'])
+                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}", 
+                               result.get('vf_ci95', 0.0),
+                               result.get('status', 'unknown'),
+                               result.get('samples', 0),
+                               args.target_rel_ci, args.seed])
+            else:
+                # Standard fields for other methods
+                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 'vf'])
+                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}"])
+        
+        print(f"\nResults saved to: {csv_path}")
+        
+    except PermissionError:
+        # Fallback to timestamped filename if permission denied
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        fallback_filename = f"{method}_{timestamp}.csv"
+        fallback_path = os.path.join(args.outdir, fallback_filename)
+        
+        with open(fallback_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            
+            if method == 'fixedgrid':
+                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
+                               'grid_nx', 'grid_ny', 'vf', 'status', 'samples_emitter', 'samples_receiver'])
+                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, 
+                               args.grid_nx, args.grid_ny, f"{vf:.8f}", 
+                               result.get('status', 'unknown'),
+                               result.get('samples_emitter', 0),
+                               result.get('samples_receiver', 0)])
+            elif method == 'adaptive':
+                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
+                               'vf', 'status', 'iterations', 'achieved_tol', 'rel_tol', 'abs_tol'])
+                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}", 
+                               result.get('status', 'unknown'),
+                               result.get('iterations', 0),
+                               result.get('achieved_tol', 0.0),
+                               args.rel_tol, args.abs_tol])
+            elif method == 'montecarlo':
+                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 
+                               'vf_mean', 'vf_ci95', 'status', 'samples', 'target_rel_ci', 'seed'])
+                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}", 
+                               result.get('vf_ci95', 0.0),
+                               result.get('status', 'unknown'),
+                               result.get('samples', 0),
+                               args.target_rel_ci, args.seed])
+            else:
+                writer.writerow(['emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle', 'vf'])
+                writer.writerow([em_w, em_h, rc_w, rc_h, setback, angle, f"{vf:.8f}"])
+        
+        print(f"\nResults saved to: {fallback_path}")
 
 
 def main_with_args(args: argparse.Namespace) -> int:
