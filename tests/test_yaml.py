@@ -161,8 +161,8 @@ def test_expected_values_handling():
     """Test handling of expected values and tolerances."""
     cases = load_cases("docs/validation_cases.yaml")
     
-    # Find cases with expected values
-    cases_with_expected = [c for c in cases if c.get("expected")]
+    # Find cases with expected values (excluding those with F12: null)
+    cases_with_expected = [c for c in cases if c.get("expected") and c.get("expected", {}).get("F12") is not None]
     assert len(cases_with_expected) > 0, "Should have cases with expected values"
     
     for case in cases_with_expected:
