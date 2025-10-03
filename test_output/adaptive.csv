@@ -1,2 +1,0 @@
-method,emitter_w,emitter_h,receiver_w,receiver_h,setback,angle,vf,vf_mean,ci95,status,iterations,samples,achieved_tol,time_s,cells
-adaptive,5.1,2.1,5.1,2.1,1.0,0.0,0.70255344,,,converged,142,,0.002982230966957131,0.011,442
