@@ -201,19 +201,19 @@ def test_cli_defaults():
     assert args.abs_tol == 1e-6
     assert args.max_depth == 12
     assert args.min_cell_area_frac == 1e-8
-    assert args.max_cells == 200000
+    assert args.max_cells == 150000
     assert args.time_limit_s == 60.0
     assert args.init_grid == '4x4'
     
     # Test fixed grid defaults
-    assert args.grid_nx == 100
-    assert args.grid_ny == 100
+    assert args.grid_nx == 160
+    assert args.grid_ny == 160
     assert args.quadrature == 'centroid'
     
     # Test Monte Carlo defaults
-    assert args.samples == 200000
+    assert args.samples == 300000
     assert args.target_rel_ci == 0.02
-    assert args.max_iters == 50
+    assert args.max_iters == 60
     assert args.seed == 42
     
     # Test general defaults
@@ -243,17 +243,18 @@ def test_cli_validation():
         abs_tol=1e-6,
         max_depth=12,
         min_cell_area_frac=1e-8,
-        max_cells=200000,
+        max_cells=150000,
         time_limit_s=60.0,
         init_grid='4x4',
-        grid_nx=100,
-        grid_ny=100,
+        grid_nx=160,
+        grid_ny=160,
         quadrature='centroid',
-        samples=200000,
+        samples=300000,
         target_rel_ci=0.02,
-        max_iters=50,
+        max_iters=60,
         seed=42,
-        verbose=False
+        verbose=False,
+        version=False
     )
     
     # Should not raise exception
@@ -283,11 +284,11 @@ def test_cli_validation_errors():
         rel_tol=3e-3,
         abs_tol=1e-6,
         max_depth=12,
-        max_cells=200000,
+        max_cells=150000,
         time_limit_s=60.0,
-        grid_nx=100,
-        grid_ny=100,
-        samples=200000,
+        grid_nx=160,
+        grid_ny=160,
+        samples=300000,
         target_rel_ci=0.02,
         max_iters=50
     )
@@ -333,8 +334,8 @@ def test_cli_main_with_args():
         cases=None,
         plot=False,
         outdir=Path('./results'),
-        analytical_nx=240,
-        analytical_ny=240,
+        analytical_nx=220,
+        analytical_ny=220,
         rc_mode='center',
         rc_grid_n=21,
         rc_search_rel_tol=3e-3,
@@ -346,17 +347,18 @@ def test_cli_main_with_args():
         abs_tol=1e-6,
         max_depth=12,
         min_cell_area_frac=1e-8,
-        max_cells=200000,
+        max_cells=150000,
         time_limit_s=60.0,
         init_grid='4x4',
-        grid_nx=100,
-        grid_ny=100,
+        grid_nx=160,
+        grid_ny=160,
         quadrature='centroid',
-        samples=200000,
+        samples=300000,
         target_rel_ci=0.02,
-        max_iters=50,
+        max_iters=60,
         seed=42,
-        verbose=False
+        verbose=False,
+        version=False
     )
     
     # Should return 0 for success

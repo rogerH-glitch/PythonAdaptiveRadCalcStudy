@@ -43,6 +43,19 @@ python -m pytest -q
 python main.py --cases DOCS/validation_cases.yaml --outdir results --plot
 ```
 
+## Version & reproducibility
+
+- Print version:
+```bash
+python main.py --version
+```
+
+- Deterministic defaults are set for each method (e.g., Monte Carlo seed=42).
+- To lock dependencies from your current environment:
+```powershell
+.\scripts\freeze-lock.ps1
+```
+
 ## Installation
 
 ### Prerequisites

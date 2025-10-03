@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import logging
 
+from . import __version__
+
 def _ensure_headless_matplotlib():
     """
     Use a headless backend when no display is available (Windows/CI safe).
@@ -69,6 +71,13 @@ Default assumptions:
   - Receiver dimensions default to emitter dimensions
   - Parallel orientation (angle = 0°)
         """
+    )
+    
+    # Version flag
+    parser.add_argument(
+        '--version',
+        action='store_true',
+        help='Print version and exit'
     )
     
     # Core calculation method (required unless using --cases)
@@ -132,14 +141,14 @@ Default assumptions:
     analytical_group.add_argument(
         '--analytical-nx',
         type=int,
-        default=240,
-        help='Emitter grid Nx for analytical approx (default: 240)'
+        default=220,
+        help='Emitter grid Nx for analytical approx (default: 220)'
     )
     analytical_group.add_argument(
         '--analytical-ny',
         type=int,
-        default=240,
-        help='Emitter grid Ny for analytical approx (default: 240)'
+        default=220,
+        help='Emitter grid Ny for analytical approx (default: 220)'
     )
     
     # Adaptive method tuning parameters
@@ -171,8 +180,8 @@ Default assumptions:
     adaptive_group.add_argument(
         '--max-cells',
         type=int,
-        default=200000,
-        help='Maximum number of cells (default: 200000)'
+        default=150000,
+        help='Maximum number of cells (default: 150000)'
     )
     adaptive_group.add_argument(
         '--time-limit-s',
@@ -192,14 +201,14 @@ Default assumptions:
     fixed_group.add_argument(
         '--grid-nx',
         type=int,
-        default=100,
-        help='Grid points in x-direction (default: 100)'
+        default=160,
+        help='Grid points in x-direction (default: 160)'
     )
     fixed_group.add_argument(
         '--grid-ny',
         type=int,
-        default=100,
-        help='Grid points in y-direction (default: 100)'
+        default=160,
+        help='Grid points in y-direction (default: 160)'
     )
     fixed_group.add_argument(
         '--quadrature',
@@ -213,8 +222,8 @@ Default assumptions:
     mc_group.add_argument(
         '--samples',
         type=int,
-        default=200000,
-        help='Number of samples (default: 200000)'
+        default=300000,
+        help='Number of samples (default: 300000)'
     )
     mc_group.add_argument(
         '--target-rel-ci',
@@ -225,8 +234,8 @@ Default assumptions:
     mc_group.add_argument(
         '--max-iters',
         type=int,
-        default=50,
-        help='Maximum iterations (default: 50)'
+        default=60,
+        help='Maximum iterations (default: 60)'
     )
     mc_group.add_argument(
         '--seed',
@@ -960,17 +969,26 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             
-            # Header row
+            # Header row - stable schema as per requirements
             writer.writerow([
                 'method', 'emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle',
-                'rc_mode', 'x_peak', 'y_peak', 'vf_peak', 'status', 'evaluations', 'search_time_s'
+                'vf', 'vf_mean', 'ci95', 'status', 'iterations', 'samples', 'achieved_tol', 'time_s', 'cells'
             ])
             
-            # Data row
+            # Extract method-specific metadata
+            iterations = search_metadata.get('iterations', '')
+            samples = search_metadata.get('samples', '')
+            achieved_tol = search_metadata.get('achieved_tol', '')
+            cells = search_metadata.get('cells', '')
+            
+            # For Monte Carlo, use vf_mean and ci95
+            vf_mean = result.get('vf_mean', '')
+            ci95 = result.get('ci95', '')
+            
+            # Data row - stable schema
             writer.writerow([
                 method, em_w, em_h, rc_w, rc_h, setback, angle,
-                rc_mode, f"{x_peak:.6f}", f"{y_peak:.6f}", f"{vf:.8f}", 
-                status, evaluations, f"{search_time:.3f}"
+                f"{vf:.8f}", vf_mean, ci95, status, iterations, samples, achieved_tol, f"{search_time:.3f}", cells
             ])
         
         print(f"\nResults saved to: {csv_path}")
@@ -985,17 +1003,16 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
         with open(fallback_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             
-            # Header row
+            # Header row - stable schema as per requirements
             writer.writerow([
                 'method', 'emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle',
-                'rc_mode', 'x_peak', 'y_peak', 'vf_peak', 'status', 'evaluations', 'search_time_s'
+                'vf', 'vf_mean', 'ci95', 'status', 'iterations', 'samples', 'achieved_tol', 'time_s', 'cells'
             ])
             
-            # Data row
+            # Data row - stable schema
             writer.writerow([
                 method, em_w, em_h, rc_w, rc_h, setback, angle,
-                rc_mode, f"{x_peak:.6f}", f"{y_peak:.6f}", f"{vf:.8f}", 
-                status, evaluations, f"{search_time:.3f}"
+                f"{vf:.8f}", vf_mean, ci95, status, iterations, samples, achieved_tol, f"{search_time:.3f}", cells
             ])
         
         print(f"\nResults saved to: {fallback_path}")
@@ -1011,6 +1028,11 @@ def main_with_args(args: argparse.Namespace) -> int:
         Exit code (0 for success, non-zero for error)
     """
     try:
+        # Handle version flag
+        if args.version:
+            print(__version__)
+            return 0
+        
         # Set logging level
         if args.verbose:
             logging.getLogger().setLevel(logging.DEBUG)

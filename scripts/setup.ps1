@@ -9,7 +9,7 @@ Write-Host "== Setup starting =="
 $here = (Get-Location).Path
 if ($here -like "*OneDrive*") {
   $Venv = "C:\venvs\parc"
-  Write-Host "OneDrive detected → using external venv at $Venv"
+    Write-Host "OneDrive detected -> using external venv at $Venv"
 }
 
 # Create venv if missing

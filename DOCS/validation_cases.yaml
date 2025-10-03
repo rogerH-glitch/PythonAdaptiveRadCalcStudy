@@ -56,10 +56,10 @@ cases:
     geometry: { emitter: { w: 5.1, h: 2.1 }, receiver: { w: 5.1, h: 2.1 }, setback: 1.0, angle: 0 }
     expected: { F12: 0.70274, tolerance: { type: relative, value: 3.0e-3 } }
 
-  - id: hc_5x2_s3p8
+  - id: hc_5p1x2p1_s3p8
     enabled: true
     description: Unobstructed; parallel; centres aligned.
-    geometry: { emitter: { w: 5.0, h: 2.0 }, receiver: { w: 5.0, h: 2.0 }, setback: 3.8, angle: 0 }
+    geometry: { emitter: { w: 5.1, h: 2.1 }, receiver: { w: 5.1, h: 2.1 }, setback: 3.8, angle: 0 }
     expected: { F12: 0.17735, tolerance: { type: relative, value: 3.0e-3 } }
 
   - id: hc_20p02x1p05_s0p81
@@ -85,8 +85,8 @@ cases:
     enabled: false
     description: Receiver offset +0.5 m in x; local peak should shift toward +x edge.
     geometry:
-      emitter:  { w: 5.0, h: 2.0 }
-      receiver: { w: 5.0, h: 2.0 }
+      emitter:  { w: 5.1, h: 2.1 }
+      receiver: { w: 5.1, h: 2.1 }
       setback:  1.0
       angle:    0
       # FUTURE: requires support for receiver offset
@@ -100,8 +100,8 @@ cases:
     enabled: false
     description: Receiver rotated 5°; local peak should drift toward projected nearer side.
     geometry:
-      emitter:  { w: 5.0, h: 2.0 }
-      receiver: { w: 5.0, h: 2.0 }
+      emitter:  { w: 5.1, h: 2.1 }
+      receiver: { w: 5.1, h: 2.1 }
       setback:  1.0
       angle:    5.0
     expected:
@@ -113,8 +113,8 @@ cases:
     enabled: true
     description: Test case for area-average validation diagnostics.
     geometry:
-      emitter:  { w: 5.0, h: 2.0 }
-      receiver: { w: 5.0, h: 2.0 }
+      emitter:  { w: 5.1, h: 2.1 }
+      receiver: { w: 5.1, h: 2.1 }
       setback:  1.0
       angle:    0
     expected:
