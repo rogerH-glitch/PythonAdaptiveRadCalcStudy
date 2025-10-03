@@ -79,4 +79,32 @@ cases:
     description: Unobstructed; parallel; centres aligned.
     geometry: { emitter: { w: 21.0, h: 1.0 }, receiver: { w: 21.0, h: 1.0 }, setback: 3.67, angle: 0 }
     expected: { F12: 0.13285, tolerance: { type: relative, value: 3.0e-3 } }
+
+  # ---------- Future test cases for peak locator system ----------
+  - id: future_offset_dx0p5
+    enabled: false
+    description: Receiver offset +0.5 m in x; local peak should shift toward +x edge.
+    geometry:
+      emitter:  { w: 5.0, h: 2.0 }
+      receiver: { w: 5.0, h: 2.0 }
+      setback:  1.0
+      angle:    0
+      # FUTURE: requires support for receiver offset
+      receiver_offset: { dx: 0.5, dy: 0.0 }
+    # No exact F yet; just asserting peak location once rc_mode=search exists.
+    expected:
+      F12: null
+      tolerance: { type: relative, value: 3.0e-3 }
+
+  - id: future_small_rotation_5deg
+    enabled: false
+    description: Receiver rotated 5°; local peak should drift toward projected nearer side.
+    geometry:
+      emitter:  { w: 5.0, h: 2.0 }
+      receiver: { w: 5.0, h: 2.0 }
+      setback:  1.0
+      angle:    5.0
+    expected:
+      F12: null
+      tolerance: { type: relative, value: 3.0e-3 }
 # EXACT FILE CONTENT ENDS
