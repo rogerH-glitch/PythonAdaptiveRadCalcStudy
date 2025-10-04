@@ -13,10 +13,11 @@ __pycache__/
 .idea/
 .DS_Store
 
-# Outputs
-results/*.csv
-results/plots/*
-!results/.gitkeep
+# Outputs - ignore all top-level results folders but keep tests/artifacts tracked
+results*/
+results/
+result*/
+!tests/artifacts/
 
 # Misc
 *.log

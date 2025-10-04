@@ -1,0 +1,2 @@
+# This file ensures the tests/artifacts/ directory is tracked by git
+# even when empty, preserving the directory structure for example outputs

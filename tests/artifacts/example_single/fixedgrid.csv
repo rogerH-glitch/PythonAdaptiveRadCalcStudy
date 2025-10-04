@@ -1,0 +1,2 @@
+emitter_w,emitter_h,receiver_w,receiver_h,setback,angle,grid_nx,grid_ny,vf,status,samples_emitter,samples_receiver
+5.1,2.1,5.1,2.1,1.0,0.0,120,120,0.70024582,converged,14400,144

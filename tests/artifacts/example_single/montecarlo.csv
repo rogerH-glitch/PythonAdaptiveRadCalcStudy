@@ -1,2 +1,2 @@
 emitter_w,emitter_h,receiver_w,receiver_h,setback,angle,vf_mean,vf_ci95,status,samples,target_rel_ci,seed
-5.1,2.1,5.1,2.1,1.0,0.0,0.70358342,0.0,converged,50000,0.015,42
+5.1,2.1,5.1,2.1,1.0,0.0,0.70358342,0.0,converged,50000,0.02,42

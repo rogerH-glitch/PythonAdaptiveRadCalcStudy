@@ -1,0 +1,11 @@
+id,method,vf,ci95,expected,rel_err,status,iterations,achieved_tol,validation,validation_rel_err,ref_analytical,rel_err_to_ref,attempts,vf_point_center,vf_receiver_avg,compare_to,avg_gt_center,notes
+nist_analytic_obstructed_unit_squares,adaptive,,,,,skipped,,,,,,,,,,,,disabled
+hc_5p1x2p1_s0p05,adaptive,0.99813471,,0.998805,0.000671,converged,524,0.002996292965716792,pass,0.000671,0.99880510,0.000671,1,0.99813471,0.97502411,point,False,"calc_time=0.047s, rc=(0.000,0.000)"
+hc_5p1x2p1_s1p0,adaptive,0.70255344,,0.70274,0.000265,converged,142,0.0029822309669571274,pass,0.000265,0.70274393,0.000271,1,0.70255344,0.54287078,point,False,"calc_time=0.004s, rc=(0.000,0.000)"
+hc_5p1x2p1_s3p8,adaptive,0.17751030,,0.17735,0.000904,converged,7,0.0027288641085932556,pass,0.000904,0.17735395,0.000882,1,0.17751030,0.15107088,point,False,"calc_time=0.000s, rc=(0.000,0.000)"
+hc_20p02x1p05_s0p81,adaptive,0.54354560,,0.54375,0.000376,converged,1174,0.0029994929048901406,pass,0.000376,0.54375132,0.000378,1,0.54354560,0.47825531,point,False,"calc_time=0.145s, rc=(0.000,0.000)"
+hc_20p02x1p05_s1p8,adaptive,0.27924911,,0.27931,0.000218,converged,531,0.002997427291498125,pass,0.000218,0.27930803,0.000211,1,0.27924911,0.25464226,point,False,"calc_time=0.046s, rc=(0.000,0.000)"
+hc_21x1_s3p67,adaptive,0.13282800,,0.13285,0.000166,converged,232,0.002994969273848625,pass,0.000166,0.13284540,0.000131,1,0.13282800,0.11900104,point,False,"calc_time=0.010s, rc=(0.000,0.000)"
+future_offset_dx0p5,adaptive,,,,,skipped,,,,,,,,,,,,disabled
+future_small_rotation_5deg,adaptive,,,,,skipped,,,,,,,,,,,,disabled
+test_area_avg_validation,adaptive,0.70255344,,0.70274,0.000265,converged,142,0.0029822309669571235,out_of_spec,0.227494,0.70274393,0.000271,1,0.70255344,0.54287078,area_avg,False,"calc_time=0.003s, rc=(0.000,0.000)"
