@@ -46,11 +46,7 @@ except ImportError as e:
 
 from .analytical import local_peak_vf_analytic_approx, validate_geometry, get_analytical_info
 
-# Set up logging
-logging.basicConfig(
-    level=logging.WARNING,  # Suppress verbose logs by default
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Logger will be configured after argument parsing
 logger = logging.getLogger(__name__)
 
 
@@ -328,6 +324,12 @@ Default assumptions:
         '--verbose', '-v',
         action='store_true',
         help='Enable verbose logging'
+    )
+    parser.add_argument(
+        '--log-level',
+        choices=('WARNING', 'INFO', 'DEBUG'),
+        default='WARNING',
+        help='Logging level for this tool (third-party libs stay at WARNING unless DEBUG).'
     )
     
     return parser
@@ -1103,7 +1105,15 @@ def main_with_args(args: argparse.Namespace) -> int:
         
         # Set logging level
         if args.verbose:
-            logging.getLogger().setLevel(logging.DEBUG)
+            args.log_level = "DEBUG"
+        
+        level = getattr(logging, args.log_level)
+        logging.basicConfig(level=level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        
+        if args.log_level != "DEBUG":
+            logging.getLogger("matplotlib").setLevel(logging.WARNING)
+            logging.getLogger("PIL").setLevel(logging.WARNING)
+            logging.getLogger("fontTools").setLevel(logging.WARNING)
         
         # Handle plotting setup if requested
         if args.plot:
