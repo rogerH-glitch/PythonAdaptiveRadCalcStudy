@@ -243,7 +243,7 @@ def _coarse_to_fine_search(
 
 def create_vf_evaluator(
     method: str, em_w: float, em_h: float, rc_w: float, rc_h: float, 
-    setback: float, angle: float, **method_params
+    setback: float, angle: float, geom_cfg: Optional[Dict] = None, **method_params
 ) -> Callable[[float, float], Tuple[float, Dict]]:
     """
     Create a point view factor evaluator for the specified method.
@@ -254,6 +254,7 @@ def create_vf_evaluator(
         rc_w, rc_h: Receiver dimensions
         setback: Setback distance
         angle: Rotation angle (degrees)
+        geom_cfg: Geometry configuration dict with offsets and rotation settings
         **method_params: Method-specific parameters
         
     Returns:
@@ -262,12 +263,25 @@ def create_vf_evaluator(
     
     if method == "analytical":
         from .analytical import vf_point_rect_to_point
+        from .geometry import to_emitter_frame
         
         def evaluator(x: float, y: float) -> Tuple[float, Dict]:
+            # Transform receiver point to emitter frame if geometry config provided
+            if geom_cfg:
+                rx_local, ry_local = to_emitter_frame(
+                    (x, y),  # receiver point in receiver local coordinates
+                    geom_cfg.get('emitter_offset', (0.0, 0.0)),
+                    geom_cfg.get('receiver_offset', (0.0, 0.0)),
+                    geom_cfg.get('angle_deg', 0.0),
+                    geom_cfg.get('rotate_target', 'emitter')
+                )
+            else:
+                rx_local, ry_local = x, y
+            
             # For analytical method, we can evaluate at a specific point
             vf = vf_point_rect_to_point(
                 em_w, em_h, rc_w, rc_h, setback, angle,
-                x, y, 
+                rx_local, ry_local, 
                 nx=method_params.get('analytical_nx', 240),
                 ny=method_params.get('analytical_ny', 240)
             )
@@ -277,8 +291,21 @@ def create_vf_evaluator(
     
     elif method == "adaptive":
         from .adaptive import vf_adaptive
+        from .geometry import to_emitter_frame
         
         def evaluator(x: float, y: float) -> Tuple[float, Dict]:
+            # Transform receiver point to emitter frame if geometry config provided
+            if geom_cfg:
+                rx_local, ry_local = to_emitter_frame(
+                    (x, y),  # receiver point in receiver local coordinates
+                    geom_cfg.get('emitter_offset', (0.0, 0.0)),
+                    geom_cfg.get('receiver_offset', (0.0, 0.0)),
+                    geom_cfg.get('angle_deg', 0.0),
+                    geom_cfg.get('rotate_target', 'emitter')
+                )
+            else:
+                rx_local, ry_local = x, y
+            
             # For adaptive method, evaluate at the specific receiver point
             result = vf_adaptive(
                 em_w, em_h, rc_w, rc_h, setback,
@@ -288,7 +315,7 @@ def create_vf_evaluator(
                 max_cells=method_params.get('max_cells', 10000),
                 min_cells=method_params.get('min_cells', 16),
                 time_limit_s=method_params.get('time_limit_s', 60.0),
-                rc_point=(x, y)
+                rc_point=(rx_local, ry_local)
             )
             return result['vf'], {
                 'iterations': result.get('iterations', 0),
@@ -301,15 +328,29 @@ def create_vf_evaluator(
     
     elif method == "fixedgrid":
         from .fixed_grid import vf_fixed_grid
+        from .geometry import to_emitter_frame
         
         def evaluator(x: float, y: float) -> Tuple[float, Dict]:
+            # Transform receiver point to emitter frame if geometry config provided
+            if geom_cfg:
+                rx_local, ry_local = to_emitter_frame(
+                    (x, y),  # receiver point in receiver local coordinates
+                    geom_cfg.get('emitter_offset', (0.0, 0.0)),
+                    geom_cfg.get('receiver_offset', (0.0, 0.0)),
+                    geom_cfg.get('angle_deg', 0.0),
+                    geom_cfg.get('rotate_target', 'emitter')
+                )
+            else:
+                rx_local, ry_local = x, y
+            
             # For fixed grid, we can evaluate at a specific point
             result = vf_fixed_grid(
                 em_w, em_h, rc_w, rc_h, setback,
                 grid_nx=method_params.get('grid_nx', 100),
                 grid_ny=method_params.get('grid_ny', 100),
                 quadrature=method_params.get('quadrature', 'centroid'),
-                time_limit_s=method_params.get('time_limit_s', 60.0)
+                time_limit_s=method_params.get('time_limit_s', 60.0),
+                rc_point=(rx_local, ry_local)
             )
             return result['vf'], {
                 'samples_emitter': result.get('samples_emitter', 0),
@@ -320,8 +361,21 @@ def create_vf_evaluator(
     
     elif method == "montecarlo":
         from .montecarlo import vf_montecarlo
+        from .geometry import to_emitter_frame
         
         def evaluator(x: float, y: float) -> Tuple[float, Dict]:
+            # Transform receiver point to emitter frame if geometry config provided
+            if geom_cfg:
+                rx_local, ry_local = to_emitter_frame(
+                    (x, y),  # receiver point in receiver local coordinates
+                    geom_cfg.get('emitter_offset', (0.0, 0.0)),
+                    geom_cfg.get('receiver_offset', (0.0, 0.0)),
+                    geom_cfg.get('angle_deg', 0.0),
+                    geom_cfg.get('rotate_target', 'emitter')
+                )
+            else:
+                rx_local, ry_local = x, y
+            
             # For Monte Carlo, we can evaluate at a specific point
             result = vf_montecarlo(
                 em_w, em_h, rc_w, rc_h, setback,
@@ -330,7 +384,8 @@ def create_vf_evaluator(
                 max_iters=method_params.get('max_iters', 10),
                 seed=method_params.get('seed', 42),
                 time_limit_s=method_params.get('time_limit_s', 60.0),
-                rc_mode="center"  # Force center mode for point evaluation
+                rc_mode="center",  # Force center mode for point evaluation
+                rc_point=(rx_local, ry_local)
             )
             return result['vf_mean'], {
                 'samples': result.get('samples', 0),

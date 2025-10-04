@@ -115,6 +115,34 @@ Default assumptions:
         metavar='DEG',
         help='Rotation angle in degrees (default: 0 for parallel)'
     )
+    parser.add_argument(
+        '--receiver-offset',
+        nargs=2,
+        type=float,
+        metavar=('DX', 'DY'),
+        default=(0.0, 0.0),
+        help='Receiver center translation in its plane (m): +x separates, +y up.'
+    )
+    parser.add_argument(
+        '--emitter-offset',
+        nargs=2,
+        type=float,
+        metavar=('DX', 'DY'),
+        default=(0.0, 0.0),
+        help='Emitter center translation in its plane (m).'
+    )
+    parser.add_argument(
+        '--angle-pivot',
+        choices=('toe', 'center'),
+        default='toe',
+        help='Pivot for z-rotation. \'toe\' preserves minimum distance (setback).'
+    )
+    parser.add_argument(
+        '--rotate-target',
+        choices=('emitter', 'receiver'),
+        default='emitter',
+        help='Which surface to rotate about z (default emitter).'
+    )
     
     # Test cases and output options
     parser.add_argument(
@@ -429,6 +457,10 @@ def print_parsed_args(args: argparse.Namespace) -> None:
         print(f"Receiver: {args.receiver[0]:.3f} × {args.receiver[1]:.3f} m")
         print(f"Setback: {args.setback:.3f} m")
         print(f"Angle: {args.angle:.1f}°")
+        print(f"Receiver offset: ({args.receiver_offset[0]:.3f}, {args.receiver_offset[1]:.3f}) m")
+        print(f"Emitter offset: ({args.emitter_offset[0]:.3f}, {args.emitter_offset[1]:.3f}) m")
+        print(f"Rotate target: {args.rotate_target}")
+        print(f"Angle pivot: {args.angle_pivot}")
     
     print(f"Output directory: {args.outdir}")
     print(f"Generate plots: {args.plot}")
@@ -544,9 +576,18 @@ def run_cases(cases_path: str, outdir: str, plot: bool = False) -> int:
                         'time_limit_s': overrides.get('time_limit_s', 60.0)
                     }
                     
+                    # Create geometry configuration (defaults for cases)
+                    geom_cfg = {
+                        "emitter_offset": (0.0, 0.0),
+                        "receiver_offset": (0.0, 0.0),
+                        "angle_deg": float(angle),
+                        "angle_pivot": "toe",
+                        "rotate_target": "emitter",
+                    }
+                    
                     # Create evaluator function
                     vf_evaluator = create_vf_evaluator(
-                        method, em_w, em_h, rc_w, rc_h, setback, angle, **method_params
+                        method, em_w, em_h, rc_w, rc_h, setback, angle, geom_cfg, **method_params
                     )
                     
                     # Find local peak (use center mode for cases)
@@ -802,9 +843,18 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
         'time_limit_s': getattr(args, 'time_limit_s', 60.0)
     }
     
+    # Create geometry configuration
+    geom_cfg = {
+        "emitter_offset": tuple(args.emitter_offset),
+        "receiver_offset": tuple(args.receiver_offset),
+        "angle_deg": float(args.angle),
+        "angle_pivot": args.angle_pivot,
+        "rotate_target": args.rotate_target,
+    }
+    
     # Create evaluator function
     vf_evaluator = create_vf_evaluator(
-        args.method, em_w, em_h, rc_w, rc_h, setback, angle, **method_params
+        args.method, em_w, em_h, rc_w, rc_h, setback, angle, geom_cfg, **method_params
     )
     
     # Find local peak

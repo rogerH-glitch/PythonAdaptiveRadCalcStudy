@@ -230,3 +230,83 @@ def calculate_separation_distance(emitter: Rectangle, receiver: Rectangle) -> fl
         Distance between centroids in metres
     """
     return float(np.linalg.norm(receiver.centroid - emitter.centroid))
+
+
+def Rz(theta_deg: float) -> np.ndarray:
+    """Create 2D rotation matrix about z-axis.
+    
+    Args:
+        theta_deg: Rotation angle in degrees
+        
+    Returns:
+        2x2 rotation matrix
+    """
+    import math
+    th = math.radians(theta_deg)
+    c, s = math.cos(th), math.sin(th)
+    return np.array([[c, -s], [s, c]], dtype=float)
+
+
+def to_emitter_frame(rc_point_local: tuple[float, float],
+                     em_offset: tuple[float, float],
+                     rc_offset: tuple[float, float],
+                     angle_deg: float,
+                     rotate_target: str = "emitter") -> tuple[float, float]:
+    """
+    Return receiver point (x,y) expressed in the emitter's in-plane coordinates.
+
+    Assumptions: planar, parallel surfaces; offsets are in-plane translations.
+    If rotate_target=='emitter', rotate the *emitter frame* by +angle relative to world,
+    so to express rc in emitter frame, we apply the inverse rotation Rz(-angle) to the
+    world-space vector (rc_local + rc_offset - em_offset).
+    If rotate_target=='receiver', apply +angle to the receiver frame (so we rotate the
+    rc local point by +angle before differencing).
+    
+    Args:
+        rc_point_local: Receiver point in receiver local coordinates (rx, ry)
+        em_offset: Emitter offset (ex, ey) in emitter plane
+        rc_offset: Receiver offset (qx, qy) in receiver plane  
+        angle_deg: Rotation angle in degrees
+        rotate_target: Which surface to rotate ("emitter" or "receiver")
+        
+    Returns:
+        Receiver point (x, y) in emitter frame coordinates
+    """
+    rx, ry = rc_point_local
+    ex, ey = em_offset
+    qx, qy = rc_offset
+
+    v = np.array([rx + qx - ex, ry + qy - ey], dtype=float)
+
+    if abs(angle_deg) < 1e-12:
+        vv = v
+    else:
+        if rotate_target == "emitter":
+            # emitter rotated by +angle; go to emitter frame with inverse
+            Rinv = Rz(-angle_deg)
+            vv = (Rinv @ v.reshape(2, 1)).ravel()
+        else:
+            # receiver rotated by +angle; rotate rc local point forward first
+            R = Rz(angle_deg)
+            v2 = (R @ np.array([rx, ry]).reshape(2, 1)).ravel() + np.array([qx - ex, qy - ey])
+            vv = v2
+    return float(vv[0]), float(vv[1])
+
+
+def toe_pivot_adjust_emitter_center(angle_deg: float,
+                                    em_offset: tuple[float, float]) -> tuple[float, float]:
+    """
+    For pure z-rotation and zero thickness surfaces, the plane of the emitter stays at x=0 in 3D.
+    The 'toe' (nearest-face) convention is equivalent to keeping the emitter's min x-envelope
+    aligned with the separation line. In our in-plane 2D integration (emitter frame), this
+    does not change the local (y,z) parametrization. Therefore, for now, return em_offset unchanged.
+    (This hook exists to adjust center if in future you model finite thickness.)
+    
+    Args:
+        angle_deg: Rotation angle in degrees
+        em_offset: Emitter offset (ex, ey)
+        
+    Returns:
+        Adjusted emitter offset for toe pivot convention
+    """
+    return em_offset
