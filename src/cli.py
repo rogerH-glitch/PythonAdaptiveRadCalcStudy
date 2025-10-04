@@ -960,9 +960,17 @@ def print_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
         calc_time = result['calc_time']
         
         print(f"Method: {method.title()}")
-        print(f"Local Peak View Factor: {vf:.8f}")
-        print(f"Peak Location: ({float(result.get('x_peak', 0.0)):.3f}, {float(result.get('y_peak', 0.0)):.3f}) m")
-        print(f"RC Mode: {result.get('rc_mode', 'center')}")
+        
+        # Use different labels based on rc_mode
+        rc_mode = result.get('rc_mode', 'center')
+        if rc_mode == "center":
+            print(f"View Factor at Selected Point: {vf:.8f}")
+            print(f"Selected Location: ({float(result.get('x_peak', 0.0)):.3f}, {float(result.get('y_peak', 0.0)):.3f}) m")
+        else:  # grid or search
+            print(f"Local Peak View Factor: {vf:.8f}")
+            print(f"Peak Location: ({float(result.get('x_peak', 0.0)):.3f}, {float(result.get('y_peak', 0.0)):.3f}) m")
+        
+        print(f"RC Mode: {rc_mode}")
         print(f"Calculation Time: {calc_time:.3f} seconds")
         
         if 'info' in result:
