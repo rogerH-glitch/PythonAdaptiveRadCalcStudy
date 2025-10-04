@@ -1031,7 +1031,7 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
             achieved_tol = search_metadata.get('achieved_tol', '')
             cells = search_metadata.get('cells', '')
             
-            # For Monte Carlo, use vf_mean and ci95
+            # For Monte Carlo, use vf_mean and ci95; for other methods, use empty strings
             vf_mean = result.get('vf_mean', '')
             ci95 = result.get('ci95', '')
             
@@ -1058,6 +1058,16 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
                 'method', 'emitter_w', 'emitter_h', 'receiver_w', 'receiver_h', 'setback', 'angle',
                 'vf', 'vf_mean', 'ci95', 'status', 'iterations', 'samples', 'achieved_tol', 'time_s', 'cells'
             ])
+            
+            # Extract method-specific metadata
+            iterations = search_metadata.get('iterations', '')
+            samples = search_metadata.get('samples', '')
+            achieved_tol = search_metadata.get('achieved_tol', '')
+            cells = search_metadata.get('cells', '')
+            
+            # For Monte Carlo, use vf_mean and ci95; for other methods, use empty strings
+            vf_mean = result.get('vf_mean', '')
+            ci95 = result.get('ci95', '')
             
             # Data row - stable schema
             writer.writerow([
