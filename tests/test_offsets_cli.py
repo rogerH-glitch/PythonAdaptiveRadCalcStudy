@@ -20,7 +20,7 @@ def test_receiver_offset_center_matches_direct_shift():
     em_w, em_h, s = 5.0, 2.0, 1.0
     
     # Direct: evaluate at rx=+0.5 in emitter frame
-    F_direct = vf_point_rect_to_point_parallel(em_w, em_h, s, rx_local=0.5, ry_local=0.0, nx=180, ny=180)
+    F_direct = vf_point_rect_to_point_parallel(em_w, em_h, s, rx=0.5, ry=0.0, nx=180, ny=180)
     
     # Via transform: receiver offset +0.5, receiver local point = (0,0)
     rx, ry = to_emitter_frame(
@@ -30,7 +30,7 @@ def test_receiver_offset_center_matches_direct_shift():
         angle_deg=0.0, 
         rotate_target="emitter"
     )
-    F_xform = vf_point_rect_to_point_parallel(em_w, em_h, s, rx_local=rx, ry_local=ry, nx=180, ny=180)
+    F_xform = vf_point_rect_to_point_parallel(em_w, em_h, s, rx=rx, ry=ry, nx=180, ny=180)
     
     assert abs(F_direct - F_xform) / max(F_direct, 1e-12) < 5e-3
 
@@ -40,7 +40,7 @@ def test_emitter_offset_is_equivalent_negative_receiver_offset():
     em_w, em_h, s = 5.0, 2.0, 1.0
     
     # Direct: receiver at +0.3 in emitter frame
-    F1 = vf_point_rect_to_point_parallel(em_w, em_h, s, rx_local=+0.3, ry_local=0.0, nx=160, ny=160)
+    F1 = vf_point_rect_to_point_parallel(em_w, em_h, s, rx=+0.3, ry=0.0, nx=160, ny=160)
     
     # Emitter shifted +0.3 → equivalent to receiver shifted -0.3
     rx, ry = to_emitter_frame(
@@ -50,7 +50,7 @@ def test_emitter_offset_is_equivalent_negative_receiver_offset():
         angle_deg=0.0, 
         rotate_target="emitter"
     )
-    F2 = vf_point_rect_to_point_parallel(em_w, em_h, s, rx_local=rx, ry_local=ry, nx=160, ny=160)
+    F2 = vf_point_rect_to_point_parallel(em_w, em_h, s, rx=rx, ry=ry, nx=160, ny=160)
     
     assert abs(F1 - F2) / max(F1, 1e-12) < 5e-3
 
@@ -89,8 +89,9 @@ def test_emitter_rotation_transform():
         rotate_target="emitter"
     )
     
-    # With emitter rotated 90 degrees, (1,0) in receiver should become (0,1) in emitter frame
-    expected_rx, expected_ry = 0.0, 1.0
+    # With emitter rotated 90 degrees, (1,0) in receiver should become (0,-1) in emitter frame
+    # because we apply inverse rotation Rz(-90°) to go from world to emitter frame
+    expected_rx, expected_ry = 0.0, -1.0
     assert abs(rx - expected_rx) < 1e-15
     assert abs(ry - expected_ry) < 1e-15
 
@@ -178,7 +179,7 @@ def test_cli_offset_arguments():
         '--receiver-offset', '0.5', '0.3'
     ])
     
-    assert args.receiver_offset == (0.5, 0.3)
+    assert args.receiver_offset == [0.5, 0.3]
     assert args.emitter_offset == (0.0, 0.0)  # default
     assert args.rotate_target == 'emitter'  # default
     assert args.angle_pivot == 'toe'  # default
@@ -191,7 +192,7 @@ def test_cli_offset_arguments():
         '--emitter-offset', '0.2', '0.4'
     ])
     
-    assert args.emitter_offset == (0.2, 0.4)
+    assert args.emitter_offset == [0.2, 0.4]
     assert args.receiver_offset == (0.0, 0.0)  # default
     
     # Test rotation arguments
