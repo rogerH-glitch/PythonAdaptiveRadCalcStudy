@@ -99,10 +99,9 @@ def vf_point_rect_to_point(
     rx: float, ry: float, nx: int = 240, ny: int = 240
 ) -> float:
     """
-    Future-proof entry point. Currently supports angle=0 (parallel).
+    Point view factor evaluator. For non-zero angles, the caller should transform
+    receiver points into the emitter frame before calling this function.
     """
-    if abs(angle_deg) > 1e-9:
-        raise NotImplementedError("Analytical point evaluator currently supports angle=0 (parallel) only.")
     return vf_point_rect_to_point_parallel(em_w, em_h, setback, rx, ry, nx=nx, ny=ny)
 
 

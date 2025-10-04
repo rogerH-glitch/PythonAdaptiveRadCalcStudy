@@ -13,31 +13,29 @@ This tool calculates the maximum differential (point) view factor over receiver 
 - **Receiver Dimensions**: Default to emitter dimensions unless explicitly specified
 - **Coordinate System**: Right-hand coordinate system with standard orientations
 
-## Geometry Conventions
+## Geometry conventions
 
 - **Axes:** z = height (vertical), x = separation (setback), y = width.
 - **Surfaces:** zero-thickness rectangles, upright (perpendicular to ground).
-- **Setback:** minimum distance between emitter and receiver planes.
-- **Offsets:** `--receiver-offset dx dy`, `--emitter-offset dx dy` translate centers in the surface plane (x–y).
-- **Rotation (about z):**
-  - `--rotate-target {emitter|receiver}` (default `emitter`): rotates that surface about z.
-  - `--angle-pivot toe` (default) keeps the minimum distance (setback) unchanged.
-  - `--angle` is in degrees; positive is CCW in top view.
-- **Future:** small tilt about y may be added; rotation about x is not considered.
+- **Setback:** minimum distance between emitter and receiver planes (along x).
+- **Offsets:** `--receiver-offset dx dy`, `--emitter-offset dx dy` move surface centers in x–y.
+- **Rotation about z:** by default we rotate the **emitter** (`--rotate-target emitter`) using `--angle` (deg).
+  - `--angle-pivot toe` (default) preserves the specified setback as the minimum distance.
+  - The receiver remains at 0° unless you switch `--rotate-target receiver`.
+- **Search:** `--rc-mode search` finds the local-peak VF by probing receiver-local points that are transformed
+  into the emitter frame before evaluation.
 
-### Examples
+Examples:
 
-**Offset receiver + search local peak:**
-```powershell
+Receiver offset + search peak
+
 python main.py --method adaptive --emitter 5 2 --receiver 5 2 --setback 1 `
---receiver-offset 0.5 0.0 --rc-mode search --outdir results --verbose
-```
+--receiver-offset 0.5 0.0 --rc-mode search --outdir results
 
-**Rotate emitter by +20° about z, keep setback as min distance (toe pivot):**
-```powershell
+Analytical with emitter rotated +20° about z (toe pivot convention), receiver at 0°
+
 python main.py --method analytical --emitter 5 2 --receiver 5 2 --setback 1 `
 --rotate-target emitter --angle 20 --angle-pivot toe --rc-mode center --outdir results
-```
 
 ## Features
 
