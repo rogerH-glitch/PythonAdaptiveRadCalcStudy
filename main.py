@@ -7,9 +7,14 @@ view factors between rectangular surfaces using multiple methods.
 """
 
 import sys
-from src.cli import main
+import logging
 
 if __name__ == "__main__":
+    # Quiet super-verbose libs by default; --verbose in your CLI can raise levels back up.
+    logging.getLogger("matplotlib").setLevel(logging.WARNING)
+    logging.getLogger("fontTools").setLevel(logging.WARNING)
+    from src.cli import main as _main
+    
     # If no arguments provided, show usage and exit with code 2
     if len(sys.argv) == 1:
         print("Usage: python main.py [OPTIONS]")
@@ -26,4 +31,4 @@ if __name__ == "__main__":
         sys.exit(2)
     
     # Call the main CLI function
-    main()
+    _main()
