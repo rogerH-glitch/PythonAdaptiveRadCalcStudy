@@ -14,7 +14,7 @@ import json
 import os
 from datetime import datetime
 
-from .geometry import ViewFactorResult, Rectangle
+from .geometry import Rectangle
 
 
 class YamlError(Exception):
@@ -113,13 +113,13 @@ def load_config(config_path: Path) -> Dict[str, Any]:
         raise yaml.YAMLError(f"Failed to parse YAML config: {e}") from e
 
 
-def save_results(results: Dict[str, ViewFactorResult], 
+def save_results(results: Dict[str, Any], 
                 output_path: Path,
                 format: str = 'csv') -> None:
     """Save calculation results to file.
     
     Args:
-        results: Dictionary of method name to ViewFactorResult
+        results: Dictionary of method name to result data
         output_path: Output file path
         format: Output format ('csv', 'json', or 'yaml')
     """
@@ -137,7 +137,7 @@ def save_results(results: Dict[str, ViewFactorResult],
         raise ValueError(f"Unsupported output format: {format}")
 
 
-def _save_results_csv(results: Dict[str, ViewFactorResult], output_path: Path) -> None:
+def _save_results_csv(results: Dict[str, Any], output_path: Path) -> None:
     """Save results in CSV format."""
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -156,18 +156,39 @@ def _save_results_csv(results: Dict[str, ViewFactorResult], output_path: Path) -
         # Write results
         timestamp = datetime.now().isoformat()
         for method_name, result in results.items():
+            # Handle both object attributes and dictionary keys
+            if hasattr(result, 'value'):
+                view_factor = result.value
+                uncertainty = getattr(result, 'uncertainty', 0.0)
+                converged = getattr(result, 'converged', True)
+                iterations = getattr(result, 'iterations', 0)
+                computation_time = getattr(result, 'computation_time', 0.0)
+            elif isinstance(result, dict):
+                view_factor = result.get('value', result.get('view_factor', 0.0))
+                uncertainty = result.get('uncertainty', 0.0)
+                converged = result.get('converged', True)
+                iterations = result.get('iterations', 0)
+                computation_time = result.get('computation_time', 0.0)
+            else:
+                # Fallback for simple values
+                view_factor = float(result) if isinstance(result, (int, float)) else 0.0
+                uncertainty = 0.0
+                converged = True
+                iterations = 0
+                computation_time = 0.0
+            
             writer.writerow([
                 timestamp,
                 method_name,
-                f"{result.value:.8f}",
-                f"{result.uncertainty:.8f}",
-                result.converged,
-                result.iterations,
-                f"{result.computation_time:.4f}"
+                f"{view_factor:.8f}",
+                f"{uncertainty:.8f}",
+                converged,
+                iterations,
+                f"{computation_time:.4f}"
             ])
 
 
-def _save_results_json(results: Dict[str, ViewFactorResult], output_path: Path) -> None:
+def _save_results_json(results: Dict[str, Any], output_path: Path) -> None:
     """Save results in JSON format."""
     data = {
         'timestamp': datetime.now().isoformat(),
@@ -175,20 +196,44 @@ def _save_results_json(results: Dict[str, ViewFactorResult], output_path: Path) 
     }
     
     for method_name, result in results.items():
+        # Handle both object attributes and dictionary keys
+        if hasattr(result, 'value'):
+            view_factor = result.value
+            uncertainty = getattr(result, 'uncertainty', 0.0)
+            converged = getattr(result, 'converged', True)
+            iterations = getattr(result, 'iterations', 0)
+            computation_time = getattr(result, 'computation_time', 0.0)
+            method_used = getattr(result, 'method_used', method_name)
+        elif isinstance(result, dict):
+            view_factor = result.get('value', result.get('view_factor', 0.0))
+            uncertainty = result.get('uncertainty', 0.0)
+            converged = result.get('converged', True)
+            iterations = result.get('iterations', 0)
+            computation_time = result.get('computation_time', 0.0)
+            method_used = result.get('method_used', method_name)
+        else:
+            # Fallback for simple values
+            view_factor = float(result) if isinstance(result, (int, float)) else 0.0
+            uncertainty = 0.0
+            converged = True
+            iterations = 0
+            computation_time = 0.0
+            method_used = method_name
+        
         data['results'][method_name] = {
-            'view_factor': result.value,
-            'uncertainty': result.uncertainty,
-            'converged': result.converged,
-            'iterations': result.iterations,
-            'computation_time_s': result.computation_time,
-            'method_used': result.method_used
+            'view_factor': view_factor,
+            'uncertainty': uncertainty,
+            'converged': converged,
+            'iterations': iterations,
+            'computation_time_s': computation_time,
+            'method_used': method_used
         }
     
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2)
 
 
-def _save_results_yaml(results: Dict[str, ViewFactorResult], output_path: Path) -> None:
+def _save_results_yaml(results: Dict[str, Any], output_path: Path) -> None:
     """Save results in YAML format."""
     data = {
         'timestamp': datetime.now().isoformat(),
@@ -196,13 +241,37 @@ def _save_results_yaml(results: Dict[str, ViewFactorResult], output_path: Path) 
     }
     
     for method_name, result in results.items():
+        # Handle both object attributes and dictionary keys
+        if hasattr(result, 'value'):
+            view_factor = result.value
+            uncertainty = getattr(result, 'uncertainty', 0.0)
+            converged = getattr(result, 'converged', True)
+            iterations = getattr(result, 'iterations', 0)
+            computation_time = getattr(result, 'computation_time', 0.0)
+            method_used = getattr(result, 'method_used', method_name)
+        elif isinstance(result, dict):
+            view_factor = result.get('value', result.get('view_factor', 0.0))
+            uncertainty = result.get('uncertainty', 0.0)
+            converged = result.get('converged', True)
+            iterations = result.get('iterations', 0)
+            computation_time = result.get('computation_time', 0.0)
+            method_used = result.get('method_used', method_name)
+        else:
+            # Fallback for simple values
+            view_factor = float(result) if isinstance(result, (int, float)) else 0.0
+            uncertainty = 0.0
+            converged = True
+            iterations = 0
+            computation_time = 0.0
+            method_used = method_name
+        
         data['results'][method_name] = {
-            'view_factor': float(result.value),
-            'uncertainty': float(result.uncertainty),
-            'converged': bool(result.converged),
-            'iterations': int(result.iterations),
-            'computation_time_s': float(result.computation_time),
-            'method_used': str(result.method_used)
+            'view_factor': float(view_factor),
+            'uncertainty': float(uncertainty),
+            'converged': bool(converged),
+            'iterations': int(iterations),
+            'computation_time_s': float(computation_time),
+            'method_used': str(method_used)
         }
     
     with open(output_path, 'w', encoding='utf-8') as f:
@@ -285,3 +354,30 @@ def load_validation_cases(cases_path: Path) -> Dict[str, Any]:
         Dictionary containing validation test cases
     """
     return load_config(cases_path)
+
+
+def save_results(dataframe_or_dict, outdir: str, filename: str):
+    """Save results to file with improved path handling.
+    
+    Args:
+        dataframe_or_dict: Data to save (pandas DataFrame or dict)
+        outdir: Output directory path
+        filename: Output filename
+    """
+    # Always ensure directory exists
+    p = Path(outdir)
+    p.mkdir(parents=True, exist_ok=True)
+    path = str(p / filename)
+    
+    # Determine file type and save accordingly
+    if hasattr(dataframe_or_dict, 'to_csv'):
+        # Pandas DataFrame
+        dataframe_or_dict.to_csv(path, index=False)
+    elif isinstance(dataframe_or_dict, dict):
+        # Dictionary - save as JSON
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(dataframe_or_dict, f, indent=2)
+    else:
+        # Fallback - save as text
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(str(dataframe_or_dict))
