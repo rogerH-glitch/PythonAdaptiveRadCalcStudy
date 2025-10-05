@@ -112,32 +112,41 @@ Default assumptions:
         help='Rotation angle in degrees (default: 0 for parallel)'
     )
     parser.add_argument(
-        '--receiver-offset',
-        nargs=2,
-        type=float,
-        metavar=('DX', 'DY'),
-        default=(0.0, 0.0),
-        help='Receiver center translation in its plane (m): +x separates, +y up.'
+        '--rotate-target',
+        choices=('emitter', 'receiver'),
+        default='emitter',
+        help='Which panel to rotate (currently only emitter rotation affects geometry)'
     )
     parser.add_argument(
-        '--emitter-offset',
-        nargs=2,
-        type=float,
-        metavar=('DX', 'DY'),
-        default=(0.0, 0.0),
-        help='Emitter center translation in its plane (m).'
+        '--rotate-axis',
+        choices=('z', 'y'),
+        default='z',
+        help='Rotation axis: \'z\' (yaw; x–y top view) or \'y\' (pitch; x–z side view)'
     )
     parser.add_argument(
         '--angle-pivot',
         choices=('toe', 'center'),
         default='toe',
-        help='Pivot for z-rotation. \'toe\' preserves minimum distance (setback).'
+        help='Rotation pivot: \'toe\' (edge pivot; preserves min setback at that edge) or \'center\' (rotate about centre)'
     )
     parser.add_argument(
-        '--rotate-target',
-        choices=('emitter', 'receiver'),
-        default='emitter',
-        help='Which surface to rotate about z (default emitter).'
+        '--receiver-offset',
+        nargs=2,
+        type=float,
+        metavar=('DY', 'DZ'),
+        help='Centre-to-centre offset (receiver - emitter) in (y,z). Example: --receiver-offset 0.6 0.4'
+    )
+    parser.add_argument(
+        '--emitter-offset',
+        nargs=2,
+        type=float,
+        metavar=('DY', 'DZ'),
+        help='Alternative offset entry: emitter centre shift. We convert it so that (receiver - emitter)=(dy,dz).'
+    )
+    parser.add_argument(
+        '--align-centres',
+        action='store_true',
+        help='Force centres aligned in y,z (dy=dz=0) after rotation; overrides explicit offsets.'
     )
     
     # Test cases and output options
@@ -459,10 +468,22 @@ def print_parsed_args(args: argparse.Namespace) -> None:
         print(f"Receiver: {args.receiver[0]:.3f} × {args.receiver[1]:.3f} m")
         print(f"Setback: {args.setback:.3f} m")
         print(f"Angle: {args.angle:.1f}°")
-        print(f"Receiver offset: ({args.receiver_offset[0]:.3f}, {args.receiver_offset[1]:.3f}) m")
-        print(f"Emitter offset: ({args.emitter_offset[0]:.3f}, {args.emitter_offset[1]:.3f}) m")
+        print(f"Rotate axis: {args.rotate_axis}")
         print(f"Rotate target: {args.rotate_target}")
         print(f"Angle pivot: {args.angle_pivot}")
+        
+        # resolve centre-to-centre offsets (receiver - emitter)
+        dy = dz = 0.0
+        if args.align_centres:
+            dy = dz = 0.0
+        elif args.receiver_offset:
+            dy, dz = args.receiver_offset
+        elif args.emitter_offset:
+            # convert to (receiver - emitter) convention
+            dy, dz = (-args.emitter_offset[0], -args.emitter_offset[1])
+        
+        print(f"Receiver offset (receiver - emitter): ({dy:.3f}, {dz:.3f}) m  [y,z]")
+        print(f"Align centres: {args.align_centres}")
     
     print(f"Output directory: {args.outdir}")
     print(f"Generate plots: {args.plot}")
@@ -494,6 +515,22 @@ def print_parsed_args(args: argparse.Namespace) -> None:
         print("\n--- Analytical Method ---")
         print("No additional parameters")
     
+    # resolve centre-to-centre offsets (receiver - emitter)
+    dy = dz = 0.0
+    if args.align_centres:
+        dy = dz = 0.0
+    elif args.receiver_offset:
+        dy, dz = args.receiver_offset
+    elif args.emitter_offset:
+        # convert to (receiver - emitter) convention
+        dy, dz = (-args.emitter_offset[0], -args.emitter_offset[1])
+
+    print(f"\n--- Offsets & Orientation ---")
+    print(f"Receiver offset (receiver - emitter): ({dy:.3f}, {dz:.3f}) m  [y,z]")
+    print(f"Align centres: {args.align_centres}")
+    print(f"Rotate target: {args.rotate_target}")
+    print(f"Angle pivot: {args.angle_pivot}")
+
     print("\n--- Default Assumptions ---")
     print("- Surfaces face each other")
     print("- Centres are aligned")
@@ -845,15 +882,43 @@ def run_calculation(args: argparse.Namespace) -> Dict[str, Any]:
         'time_limit_s': getattr(args, 'time_limit_s', 60.0)
     }
     
-    # Create geometry configuration
+    # Resolve centre-to-centre offsets (receiver - emitter)
+    dy = dz = 0.0
+    if args.align_centres:
+        dy = dz = 0.0
+    elif args.receiver_offset:
+        dy, dz = args.receiver_offset
+    elif args.emitter_offset:
+        # convert to (receiver - emitter) convention
+        dy, dz = (-args.emitter_offset[0], -args.emitter_offset[1])
+
+    # Create geometry configuration (using new offset system)
     geom_cfg = {
-        "emitter_offset": tuple(args.emitter_offset),
-        "receiver_offset": tuple(args.receiver_offset),
+        "emitter_offset": (0.0, 0.0),  # Legacy compatibility
+        "receiver_offset": (dy, dz),    # New offset system
         "angle_deg": float(args.angle),
         "angle_pivot": args.angle_pivot,
         "rotate_target": args.rotate_target,
     }
     
+    # Optional: geometry preview (for plotting/search bounds)
+    try:
+        from .geometry import PanelSpec, PlacementOpts, place_panels
+        em = PanelSpec(args.emitter[0], args.emitter[1])
+        rc = PanelSpec(args.receiver[0], args.receiver[1])
+        opts = PlacementOpts(
+            angle_deg=args.angle,
+            rotate_axis=args.rotate_axis,
+            rotate_target=args.rotate_target,
+            pivot=args.angle_pivot,
+            offset_dy=dy, offset_dz=dz,
+            align_centres=args.align_centres,
+        )
+        _ = place_panels(em, rc, setback=args.setback, opts=opts)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Geometry preview failed: {e}")
+
     # Create evaluator function
     vf_evaluator = create_vf_evaluator(
         args.method, em_w, em_h, rc_w, rc_h, setback, angle, geom_cfg, **method_params

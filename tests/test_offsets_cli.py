@@ -180,7 +180,7 @@ def test_cli_offset_arguments():
     ])
     
     assert args.receiver_offset == [0.5, 0.3]
-    assert args.emitter_offset == (0.0, 0.0)  # default
+    assert args.emitter_offset is None  # no default, optional argument
     assert args.rotate_target == 'emitter'  # default
     assert args.angle_pivot == 'toe'  # default
     
@@ -193,7 +193,7 @@ def test_cli_offset_arguments():
     ])
     
     assert args.emitter_offset == [0.2, 0.4]
-    assert args.receiver_offset == (0.0, 0.0)  # default
+    assert args.receiver_offset is None  # no default, optional argument
     
     # Test rotation arguments
     args = parser.parse_args([
