@@ -8,6 +8,12 @@ ray tracing with statistical sampling and uncertainty estimation.
 from __future__ import annotations
 import math, time
 import numpy as np
+from typing import Tuple, Dict
+try:
+    # Orientation frame (optional). If unavailable, pointwise MC will raise.
+    from .orientation import make_emitter_frame
+except Exception:  # pragma: no cover - optional import guard
+    make_emitter_frame = None  # type: ignore
 from .constants import EPS, STATUS_CONVERGED, STATUS_REACHED_LIMITS, STATUS_FAILED
 
 
@@ -184,3 +190,89 @@ def vf_montecarlo(em_w, em_h, rc_w, rc_h, setback,
         "status": status,
         "iterations": iteration
     }
+
+
+def _mc_contrib(u: float, v: float, yR: float, zR: float, frame) -> float:
+    """
+    Oriented differential VF integrand at emitter local (u,v) to receiver point (S,yR,zR):
+        dF = max(0, n1·r̂) * max(0, n2·(-r̂)) / (π r²)  du dv
+    with p1 = C + j*u + k*v, p2 = (S, yR, zR).
+    """
+    C, j, k, n1, n2, W, H, S = frame.C, frame.j, frame.k, frame.n1, frame.n2, frame.W, frame.H, frame.S
+    p1 = C + j * u + k * v
+    p2 = np.array([S, yR, zR], dtype=float)
+    r = p2 - p1
+    r2 = float(r.dot(r))
+    if r2 <= 0.0:
+        return 0.0
+    rinv = 1.0 / math.sqrt(r2)
+    rhat = r * rinv
+    cos1 = float(n1.dot(rhat))
+    cos2 = float(n2.dot(-rhat))
+    if cos1 <= 0.0 or cos2 <= 0.0:
+        return 0.0
+    return (cos1 * cos2) / (math.pi * r2)
+
+
+def vf_point_montecarlo(
+    receiver_yz: Tuple[float, float],
+    geom: Dict,
+    samples: int = 200_000,
+    seed: int | None = None,
+    target_rel_ci: float | None = None,
+    max_iters: int = 10,
+) -> Tuple[float, Dict]:
+    """
+    Orientation-aware Monte Carlo estimate of local view factor at a single
+    receiver point (yR, zR), integrating over the emitter rectangle (u,v).
+
+    Required in `geom`:
+      - emitter_width, emitter_height, setback
+      - rotate_axis in {'z','y'}, angle (deg), angle_pivot in {'toe','center'}
+      - dy, dz (receiver - emitter centre offsets in y,z)
+    """
+    if make_emitter_frame is None:  # pragma: no cover - defensive
+        raise RuntimeError("orientation.make_emitter_frame not available; add src/orientation.py first.")
+
+    rng = np.random.default_rng(seed)
+    yR, zR = receiver_yz
+    W = float(geom["emitter_width"])  # meters
+    H = float(geom["emitter_height"])  # meters
+    S = float(geom["setback"])  # meters
+    axis = geom.get("rotate_axis", "z")
+    angle = float(geom.get("angle", 0.0))
+    pivot = geom.get("angle_pivot", "toe")
+    dy = float(geom.get("dy", 0.0))
+    dz = float(geom.get("dz", 0.0))
+
+    frame = make_emitter_frame(W, H, S, axis=axis, angle_deg=angle, pivot=pivot, dy=dy, dz=dz)
+
+    area = W * H
+    total = 0.0
+    total2 = 0.0
+    iters = 0
+
+    while True:
+        U = rng.uniform(-W / 2, W / 2, size=samples)
+        V = rng.uniform(-H / 2, H / 2, size=samples)
+        vals = np.empty(samples, dtype=float)
+        for i, (u, v) in enumerate(zip(U, V)):
+            vals[i] = _mc_contrib(u, v, yR, zR, frame)
+
+        s = float(vals.sum())
+        s2 = float((vals ** 2).sum())
+        total += s
+        total2 += s2
+        iters += 1
+
+        N = samples * iters
+        mean_cell = total / N  # mean integrand
+        var_cell = max(total2 / N - (total / N) ** 2, 0.0)
+        mean = mean_cell * area
+        std = math.sqrt(var_cell) * area
+        ci95 = 1.96 * std / math.sqrt(N) if N > 0 else float("inf")
+
+        if not target_rel_ci or iters >= max_iters:
+            return mean, {"samples": samples, "iters": iters, "ci95": ci95}
+        if mean != 0.0 and (ci95 / abs(mean)) <= target_rel_ci:
+            return mean, {"samples": samples, "iters": iters, "ci95": ci95}

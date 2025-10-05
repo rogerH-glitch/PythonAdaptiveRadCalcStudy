@@ -94,6 +94,59 @@ def find_local_peak(
         raise ValueError(f"Unknown rc_mode: {rc_mode}")
 
 
+# Public dispatcher for pointwise local VF (analytical/adaptive/fixedgrid/montecarlo)
+def local_vf(method: str, receiver_yz: Tuple[float, float], geom: Dict, params: Dict):
+    """
+    Evaluate local view factor at a single receiver point (yR, zR).
+
+    method: 'analytical' | 'adaptive' | 'fixedgrid' | 'montecarlo'
+    geom: geometry dict; for orientation-aware methods should include
+          emitter_width, emitter_height, setback, rotate_axis, angle,
+          angle_pivot, dy, dz as needed by the underlying evaluator.
+    params: method parameters (tolerances, grid sizes, samples, etc.)
+    """
+    m = (method or "").lower()
+    if m == "analytical":
+        # Defer to analytical module if available
+        try:
+            from .analytical import analytical_point  # type: ignore
+        except Exception as e:
+            raise ImportError("analytical_point not available in src.analytical") from e
+        return analytical_point(receiver_yz, geom, params)
+
+    if m == "adaptive":
+        try:
+            from .adaptive import adaptive_point  # type: ignore
+        except Exception as e:
+            raise ImportError("adaptive_point not available in src.adaptive") from e
+        return adaptive_point(receiver_yz, geom, params)
+
+    if m == "fixedgrid":
+        try:
+            from .fixed_grid import vf_point_fixed_grid  # type: ignore
+        except Exception as e:
+            raise ImportError("vf_point_fixed_grid not available in src.fixed_grid") from e
+        grid_nx = int(params.get("grid_nx", 64))
+        grid_ny = int(params.get("grid_ny", 64))
+        quadrature = params.get("quadrature", "centroid")
+        return vf_point_fixed_grid(receiver_yz, geom, grid_nx=grid_nx, grid_ny=grid_ny, quadrature=quadrature)
+
+    if m == "montecarlo":
+        try:
+            from .montecarlo import vf_point_montecarlo  # type: ignore
+        except Exception as e:
+            raise ImportError("vf_point_montecarlo not available in src.montecarlo") from e
+        samples = int(params.get("samples", 200_000))
+        seed = params.get("seed", None)
+        target_rel_ci = params.get("target_rel_ci", None)
+        max_iters = int(params.get("max_iters", 10))
+        return vf_point_montecarlo(receiver_yz, geom,
+                                   samples=samples, seed=seed,
+                                   target_rel_ci=target_rel_ci, max_iters=max_iters)
+
+    raise ValueError(f"Unknown method: {method!r}")
+
+
 def _coarse_grid_search(
     rc_w: float, rc_h: float, vf_evaluator: Callable[[float, float], Tuple[float, Dict]],
     grid_n: int, start_time: float
@@ -327,7 +380,7 @@ def create_vf_evaluator(
         return evaluator
     
     elif method == "fixedgrid":
-        from .fixed_grid import vf_fixed_grid
+        from .fixed_grid import vf_point_fixed_grid
         from .geometry import to_emitter_frame
         
         def evaluator(x: float, y: float) -> Tuple[float, Dict]:
@@ -343,24 +396,34 @@ def create_vf_evaluator(
             else:
                 rx_local, ry_local = x, y
             
-            # For fixed grid, we can evaluate at a specific point
-            result = vf_fixed_grid(
-                em_w, em_h, rc_w, rc_h, setback,
+            # Orientation-aware pointwise fixed-grid integration
+            geom_for_fg = geom_cfg or {}
+            # Ensure required fields present for pointwise evaluator
+            geom_for_fg = {
+                **geom_for_fg,
+                "emitter_width": float(em_w),
+                "emitter_height": float(em_h),
+                "setback": float(setback),
+                # defaults if not provided by upstream
+                "rotate_axis": geom_for_fg.get("rotate_axis", "z"),
+                "angle": float(geom_for_fg.get("angle_deg", 0.0)),
+                "angle_pivot": geom_for_fg.get("angle_pivot", "toe"),
+                "dy": float(geom_for_fg.get("receiver_offset", (0.0, 0.0))[0]),
+                "dz": float(geom_for_fg.get("receiver_offset", (0.0, 0.0))[1]),
+            }
+            vf_val, meta = vf_point_fixed_grid(
+                (rx_local, ry_local),
+                geom_for_fg,
                 grid_nx=method_params.get('grid_nx', 100),
                 grid_ny=method_params.get('grid_ny', 100),
                 quadrature=method_params.get('quadrature', 'centroid'),
-                time_limit_s=method_params.get('time_limit_s', 60.0),
-                rc_point=(rx_local, ry_local)
             )
-            return result['vf'], {
-                'samples_emitter': result.get('samples_emitter', 0),
-                'samples_receiver': result.get('samples_receiver', 0)
-            }
+            return vf_val, meta
         
         return evaluator
     
     elif method == "montecarlo":
-        from .montecarlo import vf_montecarlo
+        from .montecarlo import vf_point_montecarlo
         from .geometry import to_emitter_frame
         
         def evaluator(x: float, y: float) -> Tuple[float, Dict]:
@@ -376,21 +439,29 @@ def create_vf_evaluator(
             else:
                 rx_local, ry_local = x, y
             
-            # For Monte Carlo, we can evaluate at a specific point
-            result = vf_montecarlo(
-                em_w, em_h, rc_w, rc_h, setback,
+            # Orientation-aware pointwise Monte Carlo
+            geom_for_mc = geom_cfg or {}
+            geom_for_mc = {
+                **geom_for_mc,
+                "emitter_width": float(em_w),
+                "emitter_height": float(em_h),
+                "setback": float(setback),
+                "rotate_axis": geom_for_mc.get("rotate_axis", "z"),
+                "angle": float(geom_for_mc.get("angle_deg", 0.0)),
+                "angle_pivot": geom_for_mc.get("angle_pivot", "toe"),
+                "dy": float(geom_for_mc.get("receiver_offset", (0.0, 0.0))[0]),
+                "dz": float(geom_for_mc.get("receiver_offset", (0.0, 0.0))[1]),
+            }
+
+            vf_val, meta = vf_point_montecarlo(
+                (rx_local, ry_local),
+                geom_for_mc,
                 samples=method_params.get('samples', 10000),
+                seed=method_params.get('seed', 42),
                 target_rel_ci=method_params.get('target_rel_ci', 0.05),
                 max_iters=method_params.get('max_iters', 10),
-                seed=method_params.get('seed', 42),
-                time_limit_s=method_params.get('time_limit_s', 60.0),
-                rc_mode="center",  # Force center mode for point evaluation
-                rc_point=(rx_local, ry_local)
             )
-            return result['vf_mean'], {
-                'samples': result.get('samples', 0),
-                'vf_ci95': result.get('vf_ci95', 0.0)
-            }
+            return vf_val, meta
         
         return evaluator
     

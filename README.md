@@ -1,3 +1,5 @@
+## Known Issues
+- **Angle invariance (adaptive):** For large yaw/pitch, adaptive results remain ~constant. Root cause is missing/incorrect orientation in the integrand (cosθ₁·cosθ₂/(πr²), backface clamp). Tracked by `tests/test_adaptive_angle_bug_xfail.py`. Fix pending with validation against hand-calcs and NIST cases.
 # Radiation View Factor Validation Tool
 
 A local Python tool for calculating **local peak view factors** between rectangular surfaces under fire conditions. This tool implements multiple numerical methods for validation and comparison purposes.

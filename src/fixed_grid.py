@@ -7,10 +7,16 @@ subdivision with regular quadrature points for local peak view factor computatio
 
 import time
 import numpy as np
-from typing import Dict
+import math
+from typing import Dict, Tuple
 import logging
 
 from .constants import EPS, STATUS_CONVERGED, STATUS_REACHED_LIMITS, STATUS_FAILED
+try:
+    # Optional orientation support for pointwise fixed-grid evaluation
+    from .orientation import make_emitter_frame
+except Exception:  # pragma: no cover - optional import guard
+    make_emitter_frame = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -202,3 +208,90 @@ def _calculate_pointwise_vf(
                 total_vf += kernel * cell_area
     
     return total_vf
+
+
+def _fg_int_uv(u: float, v: float, yR: float, zR: float, frame) -> float:
+    """
+    Oriented differential VF integrand at emitter local (u,v) to receiver point (S,yR,zR):
+        dF = max(0, n1·r̂) * max(0, n2·(-r̂)) / (π r²)  du dv
+    where p1 = C + j*u + k*v, p2 = (S, yR, zR), r = p2 - p1.
+    """
+    C, j, k, n1, n2, W, H, S = frame.C, frame.j, frame.k, frame.n1, frame.n2, frame.W, frame.H, frame.S
+    p1 = C + j * u + k * v
+    p2 = np.array([S, yR, zR], dtype=float)
+    r = p2 - p1
+    r2 = float(r.dot(r))
+    if r2 <= 0.0:
+        return 0.0
+    rinv = 1.0 / math.sqrt(r2)
+    rhat = r * rinv
+    cos1 = float(n1.dot(rhat))
+    cos2 = float(n2.dot(-rhat))
+    if cos1 <= 0.0 or cos2 <= 0.0:
+        return 0.0
+    return (cos1 * cos2) / (math.pi * r2)
+
+
+def vf_point_fixed_grid(
+    receiver_yz: Tuple[float, float],
+    geom: Dict,
+    grid_nx: int = 64,
+    grid_ny: int = 64,
+    quadrature: str = "centroid",
+) -> Tuple[float, Dict]:
+    """
+    Orientation-aware fixed-grid estimate of local view factor at a single
+    receiver point (yR,zR), integrating over the emitter rectangle in (u,v).
+
+    Required in `geom`:
+      - emitter_width, emitter_height, setback
+      - rotate_axis in {'z','y'}, angle (deg), angle_pivot in {'toe','center'}
+      - dy, dz (receiver - emitter centre offsets in y,z)
+    """
+    if make_emitter_frame is None:  # pragma: no cover - defensive
+        raise RuntimeError("orientation.make_emitter_frame is unavailable; add src/orientation.py first.")
+
+    yR, zR = receiver_yz
+    W = float(geom["emitter_width"])  # meters
+    H = float(geom["emitter_height"])  # meters
+    S = float(geom["setback"])  # meters
+    axis = geom.get("rotate_axis", "z")
+    angle = float(geom.get("angle", 0.0))
+    pivot = geom.get("angle_pivot", "toe")
+    dy = float(geom.get("dy", 0.0))
+    dz = float(geom.get("dz", 0.0))
+
+    frame = make_emitter_frame(W, H, S, axis=axis, angle_deg=angle, pivot=pivot, dy=dy, dz=dz)
+
+    # Uniform grid in (u,v) over [-W/2,W/2] × [-H/2,H/2]
+    us = np.linspace(-W / 2, W / 2, grid_nx + 1)
+    vs = np.linspace(-H / 2, H / 2, grid_ny + 1)
+    F = 0.0
+
+    if quadrature == "centroid":
+        for i in range(grid_nx):
+            for j in range(grid_ny):
+                uc = 0.5 * (us[i] + us[i + 1])
+                vc = 0.5 * (vs[j] + vs[j + 1])
+                val = _fg_int_uv(uc, vc, yR, zR, frame)
+                F += val * (us[i + 1] - us[i]) * (vs[j + 1] - vs[j])
+    elif quadrature == "2x2":
+        w = [-1 / math.sqrt(3), +1 / math.sqrt(3)]
+        for i in range(grid_nx):
+            for j in range(grid_ny):
+                u0, u1 = us[i], us[i + 1]
+                v0, v1 = vs[j], vs[j + 1]
+                du, dv = (u1 - u0) / 2.0, (v1 - v0) / 2.0
+                uc, vc = (u0 + u1) / 2.0, (v0 + v1) / 2.0
+                cell = 0.0
+                for a in w:
+                    for b in w:
+                        uu = uc + a * du
+                        vv = vc + b * dv
+                        cell += _fg_int_uv(uu, vv, yR, zR, frame)
+                F += cell * du * dv
+    else:
+        raise ValueError("quadrature must be 'centroid' or '2x2'")
+
+    meta = {"grid_nx": grid_nx, "grid_ny": grid_ny, "quadrature": quadrature}
+    return F, meta
