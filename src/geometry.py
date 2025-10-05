@@ -7,10 +7,158 @@ for fire safety radiation calculations.
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional
+import math
 import numpy as np
 
+@dataclass
+class PanelSpec:
+    width: float   # true width (y-extent in emitter-local frame)
+    height: float  # true height (z-extent in emitter-local frame)
 
+@dataclass
+class PlacementOpts:
+    angle_deg: float = 0.0       # rotation angle
+    rotate_axis: str = "z"       # "z" (yaw) or "y" (pitch)
+    rotate_target: str = "emitter"  # currently only "emitter" supported for rotation
+    pivot: str = "toe"           # "toe" (edge pivot) or "center"
+    # offsets between centres in global (y,z): receiver_center - emitter_center
+    offset_dy: float = 0.0
+    offset_dz: float = 0.0
+    align_centres: bool = False  # force centres aligned (dy=dz=0), overrides offsets
+
+def _rect_center_yz(width: float, height: float) -> tuple[float,float]:
+    return 0.0, 0.0
+
+def _emitter_segment_yaw(width: float, angle_rad: float, pivot_edge: str):
+    """
+    Top view (x–y). Build finite segment whose length equals TRUE width.
+    pivot_edge: "top" => y=+W/2; "bottom" => y=-W/2.
+    Returns two endpoints in (x,y) BEFORE x-translation for setback.
+    """
+    W = width
+    y0 = +W/2 if pivot_edge == "top" else -W/2
+    # direction from top->bottom after yaw by +angle about z:
+    u = np.array([math.sin(angle_rad), -math.cos(angle_rad)])  # (ux, uy)
+    P0 = np.array([0.0, y0])       # pivot endpoint (nearest edge)
+    P1 = P0 - W * u                # finite length = W
+    return P0, P1
+
+def _emitter_segment_pitch(height: float, angle_rad: float, pivot_edge: str):
+    """
+    Side view (x–z). Build finite segment whose length equals TRUE height.
+    pivot_edge: "top" => z=H; "bottom" => z=0.
+    Returns two endpoints in (x,z) BEFORE x-translation for setback.
+    """
+    H = height
+    z0 = H if pivot_edge == "top" else 0.0
+    v = np.array([math.sin(angle_rad), -math.cos(angle_rad)])  # (vx, vz)
+    Q0 = np.array([0.0, z0])       # pivot endpoint (nearest edge)
+    Q1 = Q0 - H * v                # finite length = H
+    return Q0, Q1
+
+def place_panels(
+    emitter: PanelSpec,
+    receiver: PanelSpec,
+    setback: float,
+    opts: PlacementOpts,
+) -> dict:
+    """
+    Build a minimal geometric description sufficient for kernels/search bounds:
+      - Receiver is kept axis-aligned, vertical, at plane x = setback.
+      - Emitter is vertical, rotated around z (yaw) or y (pitch).
+      - If opts.pivot=="toe": rotate about the *nearest edge* and translate along +x so that
+        that edge is the min-gap location and min gap equals 'setback'.
+      - If opts.pivot=="center": rotate around emitter centre; then translate along +x so that
+        the *nearest endpoint* touches x=0 (preserves min setback), and optionally align centres.
+      - Offsets (dy,dz) are applied as centre-to-centre translations in (y,z), unless align_centres=True.
+    Returns a dict with:
+      {
+        "receiver_plane_x": setback,
+        "emitter_segment_xy": (P0, P1)  # for yaw (top view),
+        "emitter_segment_xz": (Q0, Q1)  # for pitch (side view),
+        "centres": {"emitter": (y_e, z_e), "receiver": (y_r, z_r)},
+      }
+    Notes:
+      - This is a geometric *scaffold* for positioning & plotting, not the full 3D mesh.
+      - VF kernels should still use the panel dimensions (true width/height) and transforms.
+    """
+    angle = math.radians(opts.angle_deg)
+    # receiver stays centred at (y,z) = (0,0) unless offsets/align override
+    y_r, z_r = 0.0, 0.0
+
+    if opts.align_centres:
+        dy, dz = 0.0, 0.0
+    else:
+        dy, dz = opts.offset_dy, opts.offset_dz
+
+    # emitter centre initially at (0,0), then shifted to match dy,dz sign convention:
+    y_e, z_e = y_r - dy, z_r - dz  # receiver - emitter = (dy,dz)  => emitter = receiver - (dy,dz)
+
+    geom = {
+        "receiver_plane_x": float(setback),
+        "centres": {"emitter": (y_e, z_e), "receiver": (y_r, z_r)},
+        "emitter_segment_xy": None,
+        "emitter_segment_xz": None,
+    }
+
+    if abs(angle) < 1e-12:
+        # parallel case: no segment tilt needed; kernels can treat as aligned
+        return geom
+
+    if opts.rotate_axis.lower() == "z":
+        pivot_edge = "top" if opts.pivot == "toe" else "center"
+        if pivot_edge == "top":
+            P0, P1 = _emitter_segment_yaw(emitter.width, angle, "top")
+            # translate along +x so pivot endpoint x==0 (min gap preserved at that edge)
+            dx = -P0[0]
+            P0 += np.array([dx, 0.0])
+            P1 += np.array([dx, 0.0])
+        else:
+            # rotate around centre: build around (0,0) then push along +x so nearest endpoint touches x=0
+            # half-vector h = (W/2)*(sinθ, cosθ) in (x,y)
+            W = emitter.width
+            hx, hy = (W/2)*math.sin(angle), (W/2)*math.cos(angle)
+            low  = np.array([-hx, -hy])
+            high = np.array([+hx, +hy])
+            # pick endpoint with larger y as "nearest" and set its x to 0
+            target = high if high[1] >= low[1] else low
+            dx = -target[0]
+            low  += np.array([dx, 0.0])
+            high += np.array([dx, 0.0])
+            P0, P1 = low, high
+        # finally apply centre translations in y (and z is irrelevant in top view)
+        P0[1] += y_e
+        P1[1] += y_e
+        geom["emitter_segment_xy"] = (P0, P1)
+
+    elif opts.rotate_axis.lower() == "y":
+        pivot_edge = "top" if opts.pivot == "toe" else "center"
+        if pivot_edge == "top":
+            Q0, Q1 = _emitter_segment_pitch(emitter.height, angle, "top")
+            dx = -Q0[0]
+            Q0 += np.array([dx, 0.0])
+            Q1 += np.array([dx, 0.0])
+        else:
+            H = emitter.height
+            kx, kz = (H/2)*math.sin(angle), (H/2)*math.cos(angle)
+            low  = np.array([-kx, -kz])
+            high = np.array([+kx, +kz])
+            target = high if high[1] >= low[1] else low
+            dx = -target[0]
+            low  += np.array([dx, 0.0])
+            high += np.array([dx, 0.0])
+            Q0, Q1 = low, high
+        # apply centre translations in z (top/side share same centre z)
+        Q0[1] += z_e
+        Q1[1] += z_e
+        geom["emitter_segment_xz"] = (Q0, Q1)
+    else:
+        raise ValueError("rotate_axis must be 'z' or 'y'")
+
+    return geom
+
+
+# Legacy compatibility functions (keeping existing API)
 @dataclass(frozen=True)
 class Rectangle:
     """Immutable rectangle geometry for fire safety calculations.
@@ -18,220 +166,141 @@ class Rectangle:
     Represents a rectangular surface in 3D space defined by origin point
     and two edge vectors. Used for emitter and receiver surfaces in
     view factor calculations.
-    
-    Attributes:
-        origin: 3D coordinates of rectangle corner (metres)
-        u_vector: First edge vector (metres)
-        v_vector: Second edge vector (metres)
-        
-    Example:
-        >>> # 5.1m × 2.1m rectangle at origin
-        >>> rect = Rectangle(
-        ...     origin=np.array([0.0, 0.0, 0.0]),
-        ...     u_vector=np.array([5.1, 0.0, 0.0]),
-        ...     v_vector=np.array([0.0, 2.1, 0.0])
-        ... )
-        >>> print(f"Area: {rect.area:.2f} m²")
-        Area: 10.71 m²
     """
-    
     origin: np.ndarray
-    u_vector: np.ndarray  
-    v_vector: np.ndarray
+    edge_u: np.ndarray
+    edge_v: np.ndarray
     
-    def __post_init__(self) -> None:
-        """Validate rectangle geometry after initialisation."""
-        # Convert to numpy arrays if needed
-        object.__setattr__(self, 'origin', np.asarray(self.origin, dtype=float))
-        object.__setattr__(self, 'u_vector', np.asarray(self.u_vector, dtype=float))
-        object.__setattr__(self, 'v_vector', np.asarray(self.v_vector, dtype=float))
+    def __post_init__(self):
+        """Validate rectangle geometry after initialization."""
+        if self.origin.shape != (3,):
+            raise ValueError("Origin must be a 3D point")
+        if self.edge_u.shape != (3,) or self.edge_v.shape != (3,):
+            raise ValueError("Edge vectors must be 3D vectors")
         
-        if self.area <= 0:
-            raise ValueError(f"Rectangle must have positive area, got {self.area}")
-        
-        if np.any(np.isnan(self.origin)) or np.any(np.isinf(self.origin)):
-            raise ValueError("Rectangle origin contains NaN or Inf values")
+        # Check for zero-length edges
+        if np.linalg.norm(self.edge_u) < 1e-12:
+            raise ValueError("Edge U has zero length")
+        if np.linalg.norm(self.edge_v) < 1e-12:
+            raise ValueError("Edge V has zero length")
     
     @property
     def area(self) -> float:
-        """Calculate rectangle area in square metres."""
-        return float(np.linalg.norm(np.cross(self.u_vector, self.v_vector)))
+        """Calculate rectangle area."""
+        return np.linalg.norm(np.cross(self.edge_u, self.edge_v))
     
     @property
     def normal(self) -> np.ndarray:
-        """Calculate unit normal vector using right-hand rule."""
-        cross_product = np.cross(self.u_vector, self.v_vector)
-        norm = np.linalg.norm(cross_product)
-        if norm == 0:
-            raise ValueError("Cannot calculate normal for degenerate rectangle")
-        return cross_product / norm
+        """Calculate unit normal vector."""
+        cross = np.cross(self.edge_u, self.edge_v)
+        return cross / np.linalg.norm(cross)
     
-    @property
-    def centroid(self) -> np.ndarray:
-        """Calculate rectangle centroid coordinates."""
-        return self.origin + 0.5 * (self.u_vector + self.v_vector)
-    
-    @property
-    def width(self) -> float:
-        """Width of rectangle (length of u_vector)."""
-        return float(np.linalg.norm(self.u_vector))
-    
-    @property
-    def height(self) -> float:
-        """Height of rectangle (length of v_vector)."""
-        return float(np.linalg.norm(self.v_vector))
-    
-    @classmethod
-    def from_dimensions(cls, 
-                       centre: np.ndarray,
-                       width: float, 
-                       height: float,
-                       normal: np.ndarray) -> Rectangle:
-        """Create rectangle from centre point, dimensions, and normal vector.
+    def contains_point(self, point: np.ndarray, tolerance: float = 1e-12) -> bool:
+        """Check if point lies within rectangle (within tolerance)."""
+        if point.shape != (3,):
+            return False
         
-        Args:
-            centre: Centre point of rectangle
-            width: Width in metres
-            height: Height in metres  
-            normal: Normal vector direction
-            
-        Returns:
-            Rectangle instance
-        """
-        # Normalise the normal vector
-        n = np.asarray(normal, dtype=float)
-        n = n / np.linalg.norm(n)
+        # Vector from origin to point
+        v = point - self.origin
         
-        # Create orthogonal basis vectors
-        # Choose initial tangent vector
-        if abs(n[0]) < 0.9:
-            t = np.array([1.0, 0.0, 0.0])
-        else:
-            t = np.array([0.0, 1.0, 0.0])
+        # Project onto edge vectors
+        u_proj = np.dot(v, self.edge_u) / np.dot(self.edge_u, self.edge_u)
+        v_proj = np.dot(v, self.edge_v) / np.dot(self.edge_v, self.edge_v)
         
-        # Create orthonormal basis
-        u_dir = np.cross(n, t)
-        u_dir = u_dir / np.linalg.norm(u_dir)
-        v_dir = np.cross(n, u_dir)
-        
-        # Scale by dimensions
-        u_vector = width * u_dir
-        v_vector = height * v_dir
-        
-        # Calculate origin from centre
-        origin = centre - 0.5 * (u_vector + v_vector)
-        
-        return cls(origin=origin, u_vector=u_vector, v_vector=v_vector)
+        # Check if projections are within [0,1] with tolerance
+        return (-tolerance <= u_proj <= 1 + tolerance and 
+                -tolerance <= v_proj <= 1 + tolerance)
 
 
-@dataclass
-class ViewFactorResult:
-    """Result of view factor calculation with metadata.
-    
-    This class encapsulates the result of a view factor calculation,
-    including the calculated value, convergence information, and
-    performance metrics.
-    
-    Attributes:
-        value: Calculated view factor (dimensionless, 0 ≤ F ≤ 1)
-        uncertainty: Estimated uncertainty in the calculation
-        converged: Whether the calculation converged to tolerance
-        iterations: Number of iterations performed
-        computation_time: Wall-clock time for calculation (seconds)
-        method_used: Name of calculation method employed
-    """
-    
-    value: float
-    uncertainty: float = 0.0
-    converged: bool = True
-    iterations: int = 0
-    computation_time: float = 0.0
-    method_used: str = "unknown"
-    
-    def __post_init__(self) -> None:
-        """Validate result after initialisation."""
-        if not (0.0 <= self.value <= 1.0):
-            raise ValueError(f"View factor must be in range [0, 1], got {self.value}")
-        if self.uncertainty < 0.0:
-            raise ValueError(f"Uncertainty must be non-negative, got {self.uncertainty}")
-    
-    def __str__(self) -> str:
-        """String representation of result."""
-        from .constants import STATUS_CONVERGED, STATUS_FAILED
-        status = STATUS_CONVERGED if self.converged else STATUS_FAILED
-        return (f"ViewFactorResult(value={self.value:.6f}, "
-                f"uncertainty=±{self.uncertainty:.6f}, "
-                f"status={status})")
-    
-    def is_within_tolerance(self, reference_value: float, tolerance: float = 0.003) -> bool:
-        """Check if result is within tolerance of reference value.
-        
-        Args:
-            reference_value: Reference value for comparison
-            tolerance: Relative tolerance (default: 0.003 for ±0.3%)
-            
-        Returns:
-            True if within tolerance, False otherwise
-        """
-        if reference_value == 0.0:
-            return abs(self.value) <= tolerance
-        
-        relative_error = abs(self.value - reference_value) / abs(reference_value)
-        return relative_error <= tolerance
-
-
-class GeometryError(Exception):
-    """Exception raised for invalid geometry."""
-    pass
-
-
-class CalculationError(Exception):
-    """Exception raised when calculation fails."""
-    pass
-
-
-def validate_geometry(emitter: Rectangle, receiver: Rectangle) -> None:
-    """Validate geometry for fire safety calculations.
+def create_rectangle_from_corners(
+    corner1: np.ndarray, 
+    corner2: np.ndarray, 
+    corner3: np.ndarray
+) -> Rectangle:
+    """Create rectangle from three corner points.
     
     Args:
-        emitter: Source surface geometry
-        receiver: Target surface geometry
-        
-    Raises:
-        GeometryError: If geometry is invalid for calculation
-    """
-    # Check positive areas
-    if emitter.area <= 0:
-        raise GeometryError(f"Emitter area must be positive, got {emitter.area}")
-    if receiver.area <= 0:
-        raise GeometryError(f"Receiver area must be positive, got {receiver.area}")
+        corner1: First corner point
+        corner2: Second corner point (adjacent to first)
+        corner3: Third corner point (adjacent to second)
     
-    # Check reasonable dimensions for fire safety (max 1000m)
-    max_dimension = 1000.0
-    if max(emitter.width, emitter.height) > max_dimension:
-        raise GeometryError(f"Emitter dimensions exceed {max_dimension}m limit")
-    if max(receiver.width, receiver.height) > max_dimension:
-        raise GeometryError(f"Receiver dimensions exceed {max_dimension}m limit")
-    
-    # Check minimum separation (1cm minimum for numerical stability)
-    separation = np.linalg.norm(receiver.centroid - emitter.centroid)
-    if separation < 0.01:
-        raise GeometryError("Surfaces too close for reliable calculation (< 1cm)")
-
-
-def calculate_separation_distance(emitter: Rectangle, receiver: Rectangle) -> float:
-    """Calculate separation distance between rectangle centroids.
-    
-    Args:
-        emitter: Source surface
-        receiver: Target surface
-        
     Returns:
-        Distance between centroids in metres
+        Rectangle with origin at corner1 and edges along corner1->corner2 and corner1->corner3
     """
-    return float(np.linalg.norm(receiver.centroid - emitter.centroid))
+    if corner1.shape != (3,) or corner2.shape != (3,) or corner3.shape != (3,):
+        raise ValueError("All corners must be 3D points")
+    
+    edge_u = corner2 - corner1
+    edge_v = corner3 - corner1
+    
+    return Rectangle(origin=corner1, edge_u=edge_u, edge_v=edge_v)
 
 
+def create_parallel_rectangles(
+    emitter_w: float, 
+    emitter_h: float, 
+    receiver_w: float, 
+    receiver_h: float, 
+    setback: float
+) -> tuple[Rectangle, Rectangle]:
+    """Create parallel rectangular surfaces for view factor calculation.
+    
+    Args:
+        emitter_w: Emitter width (y-direction)
+        emitter_h: Emitter height (z-direction)  
+        receiver_w: Receiver width (y-direction)
+        receiver_h: Receiver height (z-direction)
+        setback: Distance between surfaces (x-direction)
+    
+    Returns:
+        Tuple of (emitter_rectangle, receiver_rectangle)
+    """
+    # Emitter at x=0, centered at origin
+    emitter_origin = np.array([0.0, -emitter_w/2, -emitter_h/2])
+    emitter_edge_u = np.array([0.0, emitter_w, 0.0])
+    emitter_edge_v = np.array([0.0, 0.0, emitter_h])
+    
+    # Receiver at x=setback, centered at origin
+    receiver_origin = np.array([setback, -receiver_w/2, -receiver_h/2])
+    receiver_edge_u = np.array([0.0, receiver_w, 0.0])
+    receiver_edge_v = np.array([0.0, 0.0, receiver_h])
+    
+    emitter = Rectangle(origin=emitter_origin, edge_u=emitter_edge_u, edge_v=emitter_edge_v)
+    receiver = Rectangle(origin=receiver_origin, edge_u=receiver_edge_u, edge_v=receiver_edge_v)
+    
+    return emitter, receiver
+
+
+def validate_geometry(
+    emitter_w: float, 
+    emitter_h: float, 
+    receiver_w: float, 
+    receiver_h: float, 
+    setback: float
+) -> tuple[bool, str]:
+    """Validate geometry parameters for view factor calculations.
+    
+    Args:
+        emitter_w: Emitter width
+        emitter_h: Emitter height
+        receiver_w: Receiver width  
+        receiver_h: Receiver height
+        setback: Distance between surfaces
+    
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if emitter_w <= 0 or emitter_h <= 0:
+        return False, "Emitter dimensions must be positive"
+    if receiver_w <= 0 or receiver_h <= 0:
+        return False, "Receiver dimensions must be positive"
+    if setback <= 0:
+        return False, "Setback must be positive"
+    
+    return True, ""
+
+
+# Legacy rotation and transformation functions (keeping existing API)
 def Rz(theta_deg: float) -> np.ndarray:
     """Create 2D rotation matrix about z-axis.
     
@@ -241,72 +310,53 @@ def Rz(theta_deg: float) -> np.ndarray:
     Returns:
         2x2 rotation matrix
     """
-    import math
     th = math.radians(theta_deg)
     c, s = math.cos(th), math.sin(th)
     return np.array([[c, -s], [s, c]], dtype=float)
 
 
-def to_emitter_frame(rc_point_local: tuple[float, float],
-                     em_offset: tuple[float, float],
-                     rc_offset: tuple[float, float],
-                     angle_deg: float,
-                     rotate_target: str = "emitter") -> tuple[float, float]:
+def to_emitter_frame(
+    rc_point_local: tuple[float, float],
+    em_offset: tuple[float, float],
+    rc_offset: tuple[float, float],
+    angle_deg: float,
+    rotate_target: str = "emitter"
+) -> tuple[float, float]:
     """
-    Return receiver point (x,y) expressed in the emitter's in-plane coordinates.
-
-    Assumptions: planar, parallel surfaces; offsets are in-plane translations.
-    If rotate_target=='emitter', rotate the *emitter frame* by +angle relative to world,
-    so to express rc in emitter frame, we apply the inverse rotation Rz(-angle) to the
-    world-space vector (rc_local + rc_offset - em_offset).
-    If rotate_target=='receiver', apply +angle to the receiver frame (so we rotate the
-    rc local point by +angle before differencing).
-    
-    Args:
-        rc_point_local: Receiver point in receiver local coordinates (rx, ry)
-        em_offset: Emitter offset (ex, ey) in emitter plane
-        rc_offset: Receiver offset (qx, qy) in receiver plane  
-        angle_deg: Rotation angle in degrees
-        rotate_target: Which surface to rotate ("emitter" or "receiver")
-        
-    Returns:
-        Receiver point (x, y) in emitter frame coordinates
+    Map a receiver-local point (rx, ry) into the emitter frame for angle/offset handling.
+    - Offsets are x–y translations of each surface center.
+    - If rotate_target == 'emitter', the emitter is rotated by +angle (z); to express rc in emitter frame,
+      apply inverse rotation to the world vector (rc_local + rc_offset - em_offset).
+    - If rotate_target == 'receiver', rotate the receiver-local point forward by +angle, then translate.
     """
     rx, ry = rc_point_local
     ex, ey = em_offset
     qx, qy = rc_offset
 
-    v = np.array([rx + qx - ex, ry + qy - ey], dtype=float)
-
     if abs(angle_deg) < 1e-12:
-        vv = v
+        return (rx + qx - ex, ry + qy - ey)
+
+    if rotate_target == "emitter":
+        Rinv = Rz(-angle_deg)
+        v = np.array([rx + qx - ex, ry + qy - ey], dtype=float)
+        vv = (Rinv @ v.reshape(2, 1)).ravel()
+        return float(vv[0]), float(vv[1])
     else:
-        if rotate_target == "emitter":
-            # emitter rotated by +angle; go to emitter frame with inverse
-            Rinv = Rz(-angle_deg)
-            vv = (Rinv @ v.reshape(2, 1)).ravel()
-        else:
-            # receiver rotated by +angle; rotate rc local point forward first
-            R = Rz(angle_deg)
-            v2 = (R @ np.array([rx, ry]).reshape(2, 1)).ravel() + np.array([qx - ex, qy - ey])
-            vv = v2
-    return float(vv[0]), float(vv[1])
+        R = Rz(angle_deg)
+        v = (R @ np.array([rx, ry]).reshape(2, 1)).ravel()
+        vv = v + np.array([qx - ex, qy - ey])
+        return float(vv[0]), float(vv[1])
 
 
-def toe_pivot_adjust_emitter_center(angle_deg: float,
-                                    em_offset: tuple[float, float]) -> tuple[float, float]:
+def toe_pivot_adjust_emitter_center(
+    angle_deg: float, 
+    em_offset: tuple[float, float]
+) -> tuple[float, float]:
     """
     For pure z-rotation and zero thickness surfaces, the plane of the emitter stays at x=0 in 3D.
-    The 'toe' (nearest-face) convention is equivalent to keeping the emitter's min x-envelope
-    aligned with the separation line. In our in-plane 2D integration (emitter frame), this
-    does not change the local (y,z) parametrization. Therefore, for now, return em_offset unchanged.
+    The 'toe' (nearest-face) convention is equivalent to keeping the emitter's min x-envelope 
+    aligned with the separation line. In our in-plane 2D integration (emitter frame), this does 
+    not change the local (y,z) parametrization. Therefore, for now, return em_offset unchanged.
     (This hook exists to adjust center if in future you model finite thickness.)
-    
-    Args:
-        angle_deg: Rotation angle in degrees
-        em_offset: Emitter offset (ex, ey)
-        
-    Returns:
-        Adjusted emitter offset for toe pivot convention
     """
     return em_offset
