@@ -163,10 +163,15 @@ Default assumptions:
     )
     parser.add_argument(
         '--outdir',
-        type=Path,
-        default=Path('./results'),
+        type=str,
+        default=None,
         metavar='PATH',
-        help='Output directory (default: ./results)'
+        help='Directory to write outputs (CSV/plots). Stored under \'results/\' if relative.'
+    )
+    parser.add_argument(
+        '--test-run',
+        action='store_true',
+        help='Route outputs into \'results/test_results/...\'. Automatically enabled under pytest.'
     )
     
     # Analytical method tuning parameters
@@ -427,8 +432,9 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
         args.receiver = args.emitter.copy()
         logger.debug(f"Receiver dimensions defaulted to emitter: {args.receiver}")
     
-    # Ensure output directory exists
-    args.outdir.mkdir(parents=True, exist_ok=True)
+    # Ensure output directory exists (now handled by resolve_outdir)
+    if args.outdir:
+        Path(args.outdir).mkdir(parents=True, exist_ok=True)
     
     # Parse init-grid format (e.g., "4x4" -> (4, 4))
     if 'x' in args.init_grid.lower():
@@ -1189,6 +1195,18 @@ def main_with_args(args: argparse.Namespace) -> int:
                 raise SystemExit("Plotting requested but matplotlib is not available. "
                                  "Run: pip install matplotlib") from e
         
+        # Resolve output directory early so everything downstream uses a concrete path
+        try:
+            from .paths import resolve_outdir
+            out_dir_path = resolve_outdir(args.outdir, test_run=args.test_run)
+            args.outdir = str(out_dir_path)
+        except Exception as e:
+            # fallback to user-supplied or default; creation will be attempted later
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Outdir resolution failed: {e}")
+            if args.outdir is None:
+                args.outdir = "results"
+
         # Validate arguments
         validate_args(args)
         
