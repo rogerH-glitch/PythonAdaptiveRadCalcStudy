@@ -7,6 +7,30 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, Any, Optional, Tuple
 import os
+from pathlib import Path
+from .util.filenames import join_with_ts
+
+
+def _extract_grid_YZF(grid_data):
+    """Accepts dict {'Y','Z','F'} or tuple/list (Y,Z,F). Returns (Y,Z,F) or (None,None,None)."""
+    if grid_data is None:
+        return None, None, None
+    if isinstance(grid_data, dict):
+        Y = grid_data.get("Y")
+        if Y is None:
+            Y = grid_data.get("y")
+        Z = grid_data.get("Z")
+        if Z is None:
+            Z = grid_data.get("z")
+        F = grid_data.get("F")
+        if F is None:
+            F = grid_data.get("vf")
+        if F is None:
+            F = grid_data.get("field")
+        return Y, Z, F
+    if isinstance(grid_data, (tuple, list)) and len(grid_data) == 3:
+        return grid_data[0], grid_data[1], grid_data[2]
+    return None, None, None
 
 
 def create_heatmap_plot(
@@ -15,13 +39,10 @@ def create_heatmap_plot(
     grid_data: Optional[Dict[str, np.ndarray]] = None
 ) -> None:
     """
-    Create a heatmap visualization of view factor distribution across the receiver.
-    
-    Args:
-        result: Calculation results dictionary
-        args: Parsed command-line arguments
-        grid_data: Optional grid data for heatmap (x_coords, y_coords, values)
+    Legacy figure: keep the left X–Z 'Geometry Overview' panel, but fix the right heat-map to plot Y–Z,
+    apply receiver offset if available, and place the peak star consistently.
     """
+    from pathlib import Path
     if not args.plot:
         return
     
@@ -41,30 +62,36 @@ def create_heatmap_plot(
     angle = geom['angle']
     
     # Create figure
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    fig, (ax_geom, ax_hm) = plt.subplots(1, 2, figsize=(14, 6), gridspec_kw={'width_ratios': [1.0, 1.3]})
     
-    # Left plot: Geometry overview
-    _plot_geometry_overview(ax1, em_w, em_h, rc_w, rc_h, setback, angle)
+    # Left plot: Geometry overview (X–Z)
+    _plot_geometry_overview(ax_geom, em_w, em_h, rc_w, rc_h, setback, angle)
     
-    # Right plot: View factor heatmap
-    if grid_data is not None:
-        _plot_view_factor_heatmap(ax2, result, grid_data, rc_w, rc_h)
+    # Right: Y–Z heat-map using evaluated field (preferred)
+    Y, Z, F = _extract_grid_YZF(grid_data)
+    ypk = result.get("x_peak") or result.get("y_peak")  # historical naming: x_peak/y_peak represent (y,z)
+    zpk = result.get("y_peak") or result.get("z_peak")
+    if Y is not None and Z is not None and F is not None:
+        cs = ax_hm.contourf(Y, Z, F, levels=30)
+        if ypk is not None and zpk is not None:
+            ax_hm.plot([float(ypk)], [float(zpk)], marker="*", ms=12, mfc="white", mec="red")
+        ax_hm.set_xlabel("Y (m)")
+        ax_hm.set_ylabel("Z (m)")
+        fig.colorbar(cs, ax=ax_hm, label="View Factor")
     else:
-        _plot_peak_location(ax2, result, rc_w, rc_h)
+        # Fallback: draw a centered placeholder and warn in-title
+        ax_hm.text(0.5, 0.5, "Field not provided to plotting", ha="center", va="center", transform=ax_hm.transAxes)
+        ax_hm.set_axis_off()
     
-    # Add title and save
     method = result['method'].title()
-    rc_mode = result.get('rc_mode', 'center')
-    vf_peak = result['vf']
-    x_peak, y_peak = result.get('x_peak', 0.0), result.get('y_peak', 0.0)
-    
-    fig.suptitle(f'{method} Method - Peak VF: {vf_peak:.6f} at ({x_peak:.3f}, {y_peak:.3f}) m\n'
-                 f'RC Mode: {rc_mode} | Setback: {setback:.3f} m', fontsize=12)
+    sup = f"{method} Method - Peak VF: {result.get('vf', float('nan')):.6f} at ({float(ypk):.3f}, {float(zpk):.3f}) m" \
+          if (ypk is not None and zpk is not None) else f"{method} Method"
+    eval_mode = getattr(args,'eval_mode',getattr(args,'rc_mode','center'))
+    fig.suptitle(sup + f"\nRC Mode: {eval_mode} | Setback: {float(setback):.3f} m")
     
     # Save plot
     os.makedirs(args.outdir, exist_ok=True)
-    plot_filename = f"{method.lower()}_peak_heatmap.png"
-    plot_path = os.path.join(args.outdir, plot_filename)
+    plot_path = join_with_ts(args.outdir, "heatmap.png")
     
     try:
         plt.tight_layout()
