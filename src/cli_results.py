@@ -11,8 +11,15 @@ import time
 from typing import Dict, Any
 import argparse
 import logging
+from pathlib import Path
+from .util.paths import get_outdir
 
 logger = logging.getLogger(__name__)
+
+
+def _csv_path(args, method_name: str) -> Path:
+    # NEW: exactly what the user passed via --outdir
+    return get_outdir(args.outdir) / f"{method_name}.csv"
 
 
 def print_parsed_args(args: argparse.Namespace) -> None:
@@ -207,14 +214,9 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
         result: Calculation results dictionary
         args: Parsed command-line arguments
     """
-    # Ensure output directory exists and normalize path
-    from .util.paths import get_outdir
-    outdir = get_outdir(args.outdir)
-    
     # Generate output filename based on method
     method = result['method']
-    csv_filename = f"{method}.csv"
-    csv_path = outdir / csv_filename
+    csv_path = _csv_path(args, method)
     
     # Extract geometry and peak information
     geom = result['geometry']
@@ -241,10 +243,10 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
         
     except PermissionError:
         _write_csv_file_fallback(method, em_w, em_h, rc_w, rc_h, setback, angle,
-                                vf, search_metadata, search_time, outdir)
+                                vf, search_metadata, search_time, csv_path.parent)
 
 
-def _write_csv_file(csv_path: str, method: str, em_w: float, em_h: float, rc_w: float, 
+def _write_csv_file(csv_path: Path, method: str, em_w: float, em_h: float, rc_w: float, 
                    rc_h: float, setback: float, angle: float, vf: float, 
                    search_metadata: Dict[str, Any], search_time: float) -> None:
     """Write CSV file with results."""
@@ -276,12 +278,12 @@ def _write_csv_file(csv_path: str, method: str, em_w: float, em_h: float, rc_w: 
 
 def _write_csv_file_fallback(method: str, em_w: float, em_h: float, rc_w: float, 
                             rc_h: float, setback: float, angle: float, vf: float, 
-                            search_metadata: Dict[str, Any], search_time: float, outdir: str) -> None:
+                            search_metadata: Dict[str, Any], search_time: float, outdir: Path) -> None:
     """Write CSV file with timestamped filename as fallback."""
     import datetime
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     fallback_filename = f"{method}_{timestamp}.csv"
-    fallback_path = os.path.join(outdir, fallback_filename)
+    fallback_path = outdir / fallback_filename
     
     with open(fallback_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
