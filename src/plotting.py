@@ -12,25 +12,37 @@ from .util.filenames import join_with_ts
 from .util.paths import get_outdir
 
 
-def _extract_grid_YZF(grid_data):
-    """Accepts dict {'Y','Z','F'} or tuple/list (Y,Z,F). Returns (Y,Z,F) or (None,None,None)."""
-    if grid_data is None:
-        return None, None, None
-    if isinstance(grid_data, dict):
-        Y = grid_data.get("Y")
-        if Y is None:
-            Y = grid_data.get("y")
-        Z = grid_data.get("Z")
-        if Z is None:
-            Z = grid_data.get("z")
-        F = grid_data.get("F")
-        if F is None:
-            F = grid_data.get("vf")
-        if F is None:
-            F = grid_data.get("field")
-        return Y, Z, F
-    if isinstance(grid_data, (tuple, list)) and len(grid_data) == 3:
-        return grid_data[0], grid_data[1], grid_data[2]
+def _extract_grid_YZF(grid_data: Any, result: dict | None = None) -> Tuple[Any, Any, Any]:
+    """
+    Try hard to obtain (Y, Z, F) in this order:
+      1) grid_data dict with 'Y','Z','F' (or common aliases),
+      2) grid_data as (Y,Z,F) tuple/list,
+      3) fields directly on result dict ('Y','Z','F' or 'grid_Y','grid_Z','field').
+    """
+    # 1/2: look inside grid_data
+    if grid_data is not None:
+        if isinstance(grid_data, dict):
+            Y = grid_data.get("Y")
+            if Y is None:
+                Y = grid_data.get("y")
+            Z = grid_data.get("Z")
+            if Z is None:
+                Z = grid_data.get("z")
+            F = grid_data.get("F")
+            if F is None:
+                F = grid_data.get("vf")
+            if F is None:
+                F = grid_data.get("field")
+            if Y is not None and Z is not None and F is not None:
+                return Y, Z, F
+        if isinstance(grid_data, (tuple, list)) and len(grid_data) == 3:
+            return grid_data[0], grid_data[1], grid_data[2]
+    # 3) fall back to the result dict
+    if isinstance(result, dict):
+        for yk, zk, fk in (("Y","Z","F"), ("grid_Y","grid_Z","field"), ("y","z","vf_field")):
+            Y = result.get(yk); Z = result.get(zk); F = result.get(fk)
+            if Y is not None and Z is not None and F is not None:
+                return Y, Z, F
     return None, None, None
 
 
@@ -69,7 +81,7 @@ def create_heatmap_plot(
     _plot_geometry_overview(ax_geom, em_w, em_h, rc_w, rc_h, setback, angle)
     
     # Right: Y–Z heat-map using evaluated field (preferred)
-    Y, Z, F = _extract_grid_YZF(grid_data)
+    Y, Z, F = _extract_grid_YZF(grid_data, result)
     ypk = result.get("x_peak") or result.get("y_peak")  # historical naming: x_peak/y_peak represent (y,z)
     zpk = result.get("y_peak") or result.get("z_peak")
     if Y is not None and Z is not None and F is not None:
@@ -88,16 +100,17 @@ def create_heatmap_plot(
     sup = f"{method} Method - Peak VF: {result.get('vf', float('nan')):.6f} at ({float(ypk):.3f}, {float(zpk):.3f}) m" \
           if (ypk is not None and zpk is not None) else f"{method} Method"
     eval_mode = getattr(args,'eval_mode',getattr(args,'rc_mode','center'))
-    fig.suptitle(sup + f"\nRC Mode: {eval_mode} | Setback: {float(setback):.3f} m")
+    fig.suptitle(sup + f"\nEval Mode: {eval_mode} | Setback: {float(setback):.3f} m")
     
     # Save plot
-    outdir = get_outdir(args.outdir)
-    plot_path = join_with_ts(outdir, "heatmap.png")
+    # use normalized outdir (might be Path)
+    from .util.paths import get_outdir
+    out = join_with_ts(get_outdir(args.outdir), "heatmap.png")
     
     try:
         plt.tight_layout()
-        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
-        print(f"\nHeatmap plot saved to: {plot_path}")
+        plt.savefig(out, dpi=150, bbox_inches='tight')
+        print(f"\nHeatmap plot saved to: {out}")
     except Exception as e:
         print(f"Warning: Could not save plot: {e}")
     finally:
