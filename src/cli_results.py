@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 def _csv_path(args, method_name: str) -> Path:
-    # Honor the user's --outdir verbatim (no extra 'results' prefix)
-    return get_outdir(args.outdir) / f"{method_name}.csv"
+    # Honor the user's raw outdir; never trust mutated args.outdir
+    raw = getattr(args, "_outdir_user", args.outdir)
+    return get_outdir(raw) / f"{method_name}.csv"
 
 
 def save_and_report_csv(result: dict, args) -> Path:

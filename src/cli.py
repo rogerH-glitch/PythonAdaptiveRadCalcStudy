@@ -361,8 +361,8 @@ def main_with_args(args) -> int:
                     from .viz.plots import plot_geometry_and_heatmap
                     from .util.filenames import join_with_ts
                     from .util.paths import get_outdir
-                    if hasattr(args, "_outdir_user"): args.outdir = args._outdir_user
-                    out_png = join_with_ts(get_outdir(args.outdir), "geom2d.png")
+                    raw = getattr(args, "_outdir_user", args.outdir)
+                    out_png = join_with_ts(get_outdir(raw), "geom2d.png")
                     plot_geometry_and_heatmap(
                         result={**result, **{
                             "emitter_center": (float(args.setback), 0.0, 0.0),
@@ -385,7 +385,7 @@ def main_with_args(args) -> int:
                     from .viz.plot3d import geometry_3d_html
                     from .util.filenames import join_with_ts
                     from .util.paths import get_outdir
-                    if hasattr(args, "_outdir_user"): args.outdir = args._outdir_user
+                    raw = getattr(args, "_outdir_user", args.outdir)
                     import numpy as _np
                     geom = result.get("geometry", {})
                     (We, He) = geom.get("emitter", args.emitter)
@@ -397,7 +397,7 @@ def main_with_args(args) -> int:
                         dy = dz = 0.0
                     E = (float(args.setback), 0.0, 0.0)
                     R = (0.0, float(dy), float(dz))
-                    out_html = str(join_with_ts(get_outdir(args.outdir), "geom3d.html"))
+                    out_html = str(join_with_ts(get_outdir(raw), "geom3d.html"))
                     geometry_3d_html(
                         emitter_center=E, receiver_center=R,
                         We=We, He=He, Wr=Wr, Hr=Hr,

@@ -105,7 +105,8 @@ def create_heatmap_plot(
     # Save plot
     # use normalized outdir (might be Path)
     from .util.paths import get_outdir
-    out = join_with_ts(get_outdir(args.outdir), "heatmap.png")
+    raw = getattr(args, "_outdir_user", args.outdir)
+    out = join_with_ts(get_outdir(raw), "heatmap.png")
     
     try:
         plt.tight_layout()
