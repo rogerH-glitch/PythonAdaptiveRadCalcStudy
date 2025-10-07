@@ -1,6 +1,8 @@
 from __future__ import annotations
 import numpy as np
 from src.util.grid_tap import capture as _tap_capture
+import logging
+log = logging.getLogger(__name__)
 
 def sample_receiver_grid(width: float, height: float, ny: int = 81, nz: int = 61):
     """
@@ -18,12 +20,12 @@ def evaluate_grid(make_point_vf, Y, Z, dy: float, dz: float):
     make_point_vf must support vectorised (y,z) arrays measured relative to the *emitter centre*.
     """
     F = make_point_vf(Y + dy, Z + dz)
-    # One-liner tap: capture the actual evaluated field for downstream plotting
     try:
         _tap_capture(Y, Z, F)
-    except Exception:
-        # Best-effort capture; never interfere with evaluation
-        pass
+        shp = getattr(F, "shape", None)
+        log.info("[grid_eval] captured field via evaluate_grid() shape=%s", shp)
+    except Exception as e:
+        log.debug("[grid_eval] capture skipped: %s", e)
     return F
 
 def peak_from_field(F, Y, Z):
