@@ -71,7 +71,7 @@ def run_calculation(args) -> Dict[str, Any]:
     
     # Optional: geometry preview (for plotting/search bounds)
     _preview_geometry(args, dy, dz)
-
+    
     # Create evaluator function
     vf_evaluator = create_vf_evaluator(
         args.method, em_w, em_h, rc_w, rc_h, setback, angle, geom_cfg, **method_params
@@ -102,7 +102,7 @@ def run_calculation(args) -> Dict[str, Any]:
     
     # Derive offsets for geometry panel centers (receiver at origin by convention)
     dy, dz = _resolve_offsets(args)
-
+    
     # Build result dictionary
     result = {
         'method': args.method,
@@ -249,7 +249,9 @@ def _print_user_relevant_summary(args):
         print(f"Emitter offset given; equivalent receiver offset: ({-e_off[0]:.3f}, {-e_off[1]:.3f}) m  [y,z]")
 
     # Output dir & plotting flags (concise)
-    print(f"Output directory: {args.outdir}")
+    # Print exactly what the user provided, not any internal resolved path
+    outdir_raw = getattr(args, "_outdir_user", args.outdir)
+    print(f"Output directory: {outdir_raw}")
     if getattr(args, "plot", False):
         pmode = getattr(args, "plot_geom", "2d")
         print(f"Generate plots: True (geom={pmode})")
@@ -294,7 +296,7 @@ def main_with_args(args) -> int:
 
         # Map --eval-mode / --rc-mode aliases
         map_eval_mode_args(args)
-
+        
         # Validate arguments
         validate_args(args)
         
@@ -304,7 +306,7 @@ def main_with_args(args) -> int:
             print("[deprecation] --rc-mode is deprecated; use --eval-mode.", file=sys.stderr)
         if not getattr(args, 'eval_mode', None):
             args.eval_mode = args.rc_mode  # fallback to existing default
-
+        
         # If using cases file, run cases and exit
         if args.cases:
             return run_cases(args.cases, str(args.outdir), plot=args.plot)
@@ -441,6 +443,10 @@ def _setup_logging(args) -> None:
 
 def _resolve_output_directory(args) -> None:
     """Resolve output directory early so everything downstream uses a concrete path."""
+    # Preserve user's original outdir for display
+    if not hasattr(args, "_outdir_user"):
+        args._outdir_user = args.outdir
+    
     try:
         from .paths import resolve_outdir
         out_dir_path = resolve_outdir(args.outdir, test_run=args.test_run)
