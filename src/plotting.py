@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, Tuple
 import os
 from pathlib import Path
 from .util.filenames import join_with_ts
+from .util.paths import get_outdir
 
 
 def _extract_grid_YZF(grid_data):
@@ -90,8 +91,8 @@ def create_heatmap_plot(
     fig.suptitle(sup + f"\nRC Mode: {eval_mode} | Setback: {float(setback):.3f} m")
     
     # Save plot
-    os.makedirs(args.outdir, exist_ok=True)
-    plot_path = join_with_ts(args.outdir, "heatmap.png")
+    outdir = get_outdir(args.outdir)
+    plot_path = join_with_ts(outdir, "heatmap.png")
     
     try:
         plt.tight_layout()
