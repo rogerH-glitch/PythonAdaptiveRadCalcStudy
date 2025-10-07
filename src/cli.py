@@ -17,6 +17,7 @@ from .cli_parser import create_parser, validate_args, normalize_args, map_eval_m
 from dataclasses import asdict
 from .cli_cases import run_cases
 from .cli_results import print_parsed_args, print_results, save_and_report_csv
+from .util.plot_payload import attach_grid_field
 
 # Logger will be configured after argument parsing
 logger = logging.getLogger(__name__)
@@ -130,6 +131,17 @@ def run_calculation(args) -> Dict[str, Any]:
         'R_emitter': [[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],
         'R_receiver': [[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],
     })
+    
+    # Attach grid field data to result if available (for grid/search modes)
+    if getattr(args, "eval_mode", None) in ("grid", "search") or args.rc_mode in ("grid", "search"):
+        # If grid_data contains Y,Z,F, extract and attach them
+        if grid_data and isinstance(grid_data, dict):
+            Y = grid_data.get("Y")
+            Z = grid_data.get("Z")
+            F = grid_data.get("F")
+            # Attach to result if we have valid data
+            if Y is not None and Z is not None and F is not None:
+                attach_grid_field(result, Y, Z, F)
     
     return result
 
