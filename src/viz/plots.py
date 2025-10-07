@@ -39,6 +39,19 @@ def _extract_YZF_from_grid(grid_data):
         return grid_data[0], grid_data[1], grid_data[2]
     return None, None, None
 
+def _extract_YZF_from_result_fallback(result):
+    """
+    Fallback extractor that looks directly on the result dict for common keys.
+    Tries ('Y','Z','F'), then ('grid_Y','grid_Z','field'), then ('y','z','vf_field').
+    """
+    if not isinstance(result, dict):
+        return None, None, None
+    for yk, zk, fk in (("Y","Z","F"), ("grid_Y","grid_Z","field"), ("y","z","vf_field")):
+        Y = result.get(yk); Z = result.get(zk); F = result.get(fk)
+        if Y is not None and Z is not None and F is not None:
+            return Y, Z, F
+    return None, None, None
+
 def _heatmap(ax, Y, Z, F, ypk, zpk, title="View Factor Heatmap"):
     cs = ax.contourf(Y, Z, F, levels=30)
     ax.plot([ypk], [zpk], marker="*", ms=12, mfc="white", mec="red")
@@ -66,8 +79,10 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png):
     REm = np.asarray(result.get("R_emitter", np.eye(3)), float)
     RRc = np.asarray(result.get("R_receiver", np.eye(3)), float)
 
-    # Receiver-plane data
+    # Receiver-plane data (prefer grid_data, then fall back to direct fields on result)
     Y, Z, F = _extract_YZF_from_grid(result.get("grid_data"))
+    if Y is None or Z is None or F is None:
+        Y, Z, F = _extract_YZF_from_result_fallback(result)
     ypk = float(result.get("x_peak", 0.0))
     zpk = float(result.get("y_peak", 0.0))
     Fpk = float(result.get("vf", np.nan))

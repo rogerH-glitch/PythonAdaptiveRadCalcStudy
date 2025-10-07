@@ -85,6 +85,10 @@ def create_heatmap_plot(
     ypk = result.get("x_peak") or result.get("y_peak")  # historical naming: x_peak/y_peak represent (y,z)
     zpk = result.get("y_peak") or result.get("z_peak")
     if Y is not None and Z is not None and F is not None:
+        try:
+            print(f"[plot] heatmap drawing field of shape={getattr(F,'shape',None)}")
+        except Exception:
+            pass
         cs = ax_hm.contourf(Y, Z, F, levels=30)
         if ypk is not None and zpk is not None:
             ax_hm.plot([float(ypk)], [float(zpk)], marker="*", ms=12, mfc="white", mec="red")
