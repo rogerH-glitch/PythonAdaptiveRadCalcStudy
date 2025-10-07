@@ -18,8 +18,17 @@ logger = logging.getLogger(__name__)
 
 
 def _csv_path(args, method_name: str) -> Path:
-    # NEW: exactly what the user passed via --outdir
+    # Honor the user's --outdir verbatim (no extra 'results' prefix)
     return get_outdir(args.outdir) / f"{method_name}.csv"
+
+
+def save_and_report_csv(result: dict, args) -> Path:
+    """
+    Save the per-run CSV and print the *resolved* path once.
+    """
+    out = save_results(result, args)
+    print(f"Results saved to: {out}")
+    return out
 
 
 def print_parsed_args(args: argparse.Namespace) -> None:
@@ -207,12 +216,15 @@ def print_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
         print("="*50)
 
 
-def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
+def save_results(result: Dict[str, Any], args: argparse.Namespace) -> Path:
     """Save calculation results to CSV file.
     
     Args:
         result: Calculation results dictionary
         args: Parsed command-line arguments
+        
+    Returns:
+        Path to the saved CSV file
     """
     # Generate output filename based on method
     method = result['method']
@@ -239,11 +251,12 @@ def save_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
     try:
         _write_csv_file(csv_path, method, em_w, em_h, rc_w, rc_h, setback, angle,
                        vf, search_metadata, search_time)
-        print(f"\nResults saved to: {csv_path}")
+        return csv_path
         
     except PermissionError:
-        _write_csv_file_fallback(method, em_w, em_h, rc_w, rc_h, setback, angle,
-                                vf, search_metadata, search_time, csv_path.parent)
+        fallback_path = _write_csv_file_fallback(method, em_w, em_h, rc_w, rc_h, setback, angle,
+                                                vf, search_metadata, search_time, csv_path.parent)
+        return fallback_path
 
 
 def _write_csv_file(csv_path: Path, method: str, em_w: float, em_h: float, rc_w: float, 
@@ -278,8 +291,12 @@ def _write_csv_file(csv_path: Path, method: str, em_w: float, em_h: float, rc_w:
 
 def _write_csv_file_fallback(method: str, em_w: float, em_h: float, rc_w: float, 
                             rc_h: float, setback: float, angle: float, vf: float, 
-                            search_metadata: Dict[str, Any], search_time: float, outdir: Path) -> None:
-    """Write CSV file with timestamped filename as fallback."""
+                            search_metadata: Dict[str, Any], search_time: float, outdir: Path) -> Path:
+    """Write CSV file with timestamped filename as fallback.
+    
+    Returns:
+        Path to the saved fallback CSV file
+    """
     import datetime
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     fallback_filename = f"{method}_{timestamp}.csv"
@@ -310,4 +327,4 @@ def _write_csv_file_fallback(method: str, em_w: float, em_h: float, rc_w: float,
             f"{vf:.8f}", vf_mean, ci95, 'converged', iterations, samples, achieved_tol, f"{search_time:.3f}", cells
         ])
     
-    print(f"\nResults saved to: {fallback_path}")
+    return fallback_path

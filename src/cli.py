@@ -16,7 +16,7 @@ import logging
 from .cli_parser import create_parser, validate_args, normalize_args, map_eval_mode_args
 from dataclasses import asdict
 from .cli_cases import run_cases
-from .cli_results import print_parsed_args, print_results, save_results
+from .cli_results import print_parsed_args, print_results, save_and_report_csv
 
 # Logger will be configured after argument parsing
 logger = logging.getLogger(__name__)
@@ -322,7 +322,7 @@ def main_with_args(args) -> int:
         
         # Print and save results
         print_results(result, args)
-        save_results(result, args)
+        save_and_report_csv(result, args)
 
         # If grid/search produced a field, print the peak (y,z). Keep quiet for center.
         try:
