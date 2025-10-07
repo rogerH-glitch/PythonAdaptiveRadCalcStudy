@@ -2,6 +2,8 @@ import numpy as np
 from src.util.grid_tap import capture, drain
 
 def test_capture_and_drain():
+    # Drain any prior captured data from other tests
+    _ = drain()
     Y, Z = np.zeros((3,4)), np.zeros((3,4))
     F = np.ones((3,4))
     
