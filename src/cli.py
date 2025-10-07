@@ -289,7 +289,7 @@ def main_with_args(args) -> int:
                                  "Run: pip install matplotlib") from e
         
         # Resolve output directory early so everything downstream uses a concrete path
-        _resolve_output_directory(args)
+        resolved_outdir = _resolve_output_directory(args)
 
         # Provide missing geometry defaults for legacy callers
         _provide_geometry_defaults(args)
@@ -314,6 +314,10 @@ def main_with_args(args) -> int:
         # Normalize arguments and apply defaults for single case
         args = normalize_args(args)
         
+        # Guardrail: if anyone mutated args.outdir after parse, restore it to the raw user input.
+        if hasattr(args, "_outdir_user"):
+            args.outdir = args._outdir_user
+        
         # Concise, relevant summary
         _print_user_relevant_summary(args)
         
@@ -322,6 +326,12 @@ def main_with_args(args) -> int:
         
         # Print and save results
         print_results(result, args)
+        # Extra safety: warn once if outdir was mutated mid-run
+        if hasattr(args, "_outdir_user") and args.outdir != args._outdir_user:
+            import sys
+            print(f"[warning] --outdir was mutated from '{args._outdir_user}' to '{args.outdir}'. "
+                  f"Using user value.", file=sys.stderr)
+            args.outdir = args._outdir_user
         save_and_report_csv(result, args)
 
         # If grid/search produced a field, print the peak (y,z). Keep quiet for center.
@@ -338,6 +348,8 @@ def main_with_args(args) -> int:
         if args.plot:
             from .plotting import create_heatmap_plot
             from .util.paths import get_outdir
+            # Re-assert outdir before any writers
+            if hasattr(args, "_outdir_user"): args.outdir = args._outdir_user
             outdir = get_outdir(args.outdir)
             create_heatmap_plot(result, args, result.get('grid_data'))
             # Combined 2D geometry + heatmap (PNG) if requested
@@ -349,6 +361,7 @@ def main_with_args(args) -> int:
                     from .viz.plots import plot_geometry_and_heatmap
                     from .util.filenames import join_with_ts
                     from .util.paths import get_outdir
+                    if hasattr(args, "_outdir_user"): args.outdir = args._outdir_user
                     out_png = join_with_ts(get_outdir(args.outdir), "geom2d.png")
                     plot_geometry_and_heatmap(
                         result={**result, **{
@@ -372,6 +385,7 @@ def main_with_args(args) -> int:
                     from .viz.plot3d import geometry_3d_html
                     from .util.filenames import join_with_ts
                     from .util.paths import get_outdir
+                    if hasattr(args, "_outdir_user"): args.outdir = args._outdir_user
                     import numpy as _np
                     geom = result.get("geometry", {})
                     (We, He) = geom.get("emitter", args.emitter)
@@ -441,21 +455,10 @@ def _setup_logging(args) -> None:
         logging.getLogger("fontTools").setLevel(logging.WARNING)
 
 
-def _resolve_output_directory(args) -> None:
-    """Resolve output directory early so everything downstream uses a concrete path."""
-    # Preserve user's original outdir for display
-    if not hasattr(args, "_outdir_user"):
-        args._outdir_user = args.outdir
-    
-    try:
-        from .paths import resolve_outdir
-        out_dir_path = resolve_outdir(args.outdir, test_run=args.test_run)
-        args.outdir = str(out_dir_path)
-    except Exception as e:
-        # fallback to user-supplied or default; creation will be attempted later
-        logger.warning(f"Outdir resolution failed: {e}")
-        if args.outdir is None:
-            args.outdir = "results"
+def _resolve_output_directory(args):
+    # Always return the resolved Path; never mutate args.outdir here.
+    from .util.paths import get_outdir
+    return get_outdir(args.outdir)
 
 
 def _provide_geometry_defaults(args) -> None:
