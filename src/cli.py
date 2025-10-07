@@ -18,6 +18,7 @@ from dataclasses import asdict
 from .cli_cases import run_cases
 from .cli_results import print_parsed_args, print_results, save_and_report_csv
 from .util.plot_payload import attach_grid_field
+from .util.grid_tap import drain as _drain_grid
 
 # Logger will be configured after argument parsing
 logger = logging.getLogger(__name__)
@@ -335,6 +336,16 @@ def main_with_args(args) -> int:
         
         # Run calculation
         result = run_calculation(args)
+
+        # If the solver captured a receiver grid (Option A), attach it so plots can render contours
+        if getattr(args, "eval_mode", None) in ("grid", "search"):
+            tapped = _drain_grid()
+            if tapped is not None:
+                Y, Z, F = tapped
+                try:
+                    attach_grid_field(result, Y, Z, F)
+                except Exception as _e:
+                    logger.debug("attach_grid_field skipped: %s", _e)
         
         # Print and save results
         print_results(result, args)
