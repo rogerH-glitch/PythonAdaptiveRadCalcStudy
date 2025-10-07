@@ -92,8 +92,8 @@ def create_heatmap_plot(
         ax_hm.set_ylabel("Z (m)")
         fig.colorbar(cs, ax=ax_hm, label="View Factor")
     else:
-        # Fallback: draw a centered placeholder and warn in-title
-        ax_hm.text(0.5, 0.5, "Field not provided to plotting", ha="center", va="center", transform=ax_hm.transAxes)
+        # Fallback: draw a centered placeholder
+        ax_hm.text(0.5, 0.5, "No field data available", ha="center", va="center", transform=ax_hm.transAxes)
         ax_hm.set_axis_off()
     
     method = result['method'].title()

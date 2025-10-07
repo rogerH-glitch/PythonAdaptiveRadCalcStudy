@@ -95,7 +95,7 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png):
     if Y is not None and Z is not None and F is not None:
         _heatmap(ax_hm, Y, Z, F, ypk, zpk)
     else:
-        ax_hm.text(0.5, 0.5, "Heatmap unavailable for this mode",
+        ax_hm.text(0.5, 0.5, "No field data available",
                    ha="center", va="center", transform=ax_hm.transAxes)
         ax_hm.set_axis_off()
 
