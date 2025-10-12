@@ -19,6 +19,8 @@ from .cli_cases import run_cases
 from .cli_results import print_parsed_args, print_results, save_and_report_csv
 from .util.plot_payload import attach_grid_field
 from .util.grid_tap import drain as _drain_grid
+from .util.offsets import get_receiver_offset
+from .viz.field_sampler import sample_receiver_field
 
 # Logger will be configured after argument parsing
 logger = logging.getLogger(__name__)
@@ -125,12 +127,19 @@ def run_calculation(args) -> Dict[str, Any]:
         'grid_data': grid_data
     }
     # Geometry info for plotting (wireframes/labels)
+    # Make orientation/offsets visible to plotting code
     result.update({
         'We': em_w, 'He': em_h, 'Wr': rc_w, 'Hr': rc_h,
-        'emitter_center': (setback, 0.0, 0.0),
+        'emitter_center': (float(setback), 0.0, 0.0),
         'receiver_center': (0.0, float(dy), float(dz)),
         'R_emitter': [[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],
         'R_receiver': [[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],
+        'rotate_axis': str(getattr(args, 'rotate_axis', 'z')),
+        'rotate_target': str(getattr(args, 'rotate_target', 'emitter')),
+        'angle_pivot': str(getattr(args, 'angle_pivot', 'toe')),
+        'angle': float(getattr(args, 'angle', 0.0)),
+        'dy': float(dy),
+        'dz': float(dz),
     })
     
     # Attach grid field data to result if available (for grid/search modes)
@@ -236,38 +245,29 @@ def _print_user_relevant_summary(args):
     print(f"Receiver: {args.receiver[0]:.3f} × {args.receiver[1]:.3f} m")
     print(f"Setback: {float(args.setback):.3f} m")
 
-    # Orientation: only if non-zero angle or non-default rotation options
+    # Orientation: print rotation details only when angle is non-zero
     has_angle = not _isclose(getattr(args, "angle", 0.0), 0.0)
-    non_default_rot = (
-        getattr(args, "rotate_axis", "z") != "z" or
-        getattr(args, "rotate_target", "emitter") != "emitter" or
-        getattr(args, "angle_pivot", "toe") != "toe"
-    )
-    if has_angle or non_default_rot:
+    if has_angle:
         print(f"Angle: {getattr(args,'angle',0.0):.1f}°")
         print(f"Rotate axis: {getattr(args,'rotate_axis','z')}")
         print(f"Rotate target: {getattr(args,'rotate_target','emitter')}")
         print(f"Angle pivot: {getattr(args,'angle_pivot','toe')}")
 
-    # Offsets: print only if not centred or if user forced align-centres
+    # Offsets: prefer printing only the one the user provided and only if non-zero
     r_off = getattr(args, "receiver_offset", None)
     e_off = getattr(args, "emitter_offset", None)
-    align = bool(getattr(args, "align_centres", False))
-    if align:
-        print("Align centres: True")
-    if r_off and (not _isclose(r_off[0], 0.0) or not _isclose(r_off[1], 0.0)):
-        print(f"Receiver offset (receiver - emitter): ({r_off[0]:.3f}, {r_off[1]:.3f}) m  [y,z]")
-    elif e_off and (not _isclose(e_off[0], 0.0) or not _isclose(e_off[1], 0.0)):
-        # Mirror info as receiver_offset for clarity
-        print(f"Emitter offset given; equivalent receiver offset: ({-e_off[0]:.3f}, {-e_off[1]:.3f}) m  [y,z]")
+    if e_off and (not _isclose(e_off[0], 0.0) or not _isclose(e_off[1], 0.0)):
+        print(f"Emitter offset (dy,dz): ({e_off[0]:.3f}, {e_off[1]:.3f}) m")
+    elif r_off and (not _isclose(r_off[0], 0.0) or not _isclose(r_off[1], 0.0)):
+        print(f"Receiver offset (dy,dz): ({r_off[0]:.3f}, {r_off[1]:.3f}) m")
 
     # Output dir & plotting flags (concise)
     # Print exactly what the user provided, not any internal resolved path
     outdir_raw = getattr(args, "_outdir_user", args.outdir)
     print(f"Output directory: {outdir_raw}")
-    if getattr(args, "plot", False):
-        pmode = getattr(args, "plot_geom", "2d")
-        print(f"Generate plots: True (geom={pmode})")
+    plot_mode = getattr(args, "_plot_mode", "none")
+    if plot_mode != "none":
+        print(f"Generate plots: True (mode={plot_mode})")
 
 
 def main_with_args(args) -> int:
@@ -337,15 +337,32 @@ def main_with_args(args) -> int:
         # Run calculation
         result = run_calculation(args)
 
-        # If the solver captured a receiver grid (Option A), attach it so plots can render contours
+        # If solver captured a field, attach it; else sample a coarse field for plotting only
         if getattr(args, "eval_mode", None) in ("grid", "search"):
             tapped = _drain_grid()
             if tapped is not None:
                 Y, Z, F = tapped
                 try:
                     attach_grid_field(result, Y, Z, F)
+                    print(f"[plot] using captured field: shape={getattr(F, 'shape', None)}")
                 except Exception as _e:
                     logger.debug("attach_grid_field skipped: %s", _e)
+            else:
+                # Fallback sampler (plotting only)
+                try:
+                    # Prefer receiver dims; fall back to emitter tuple if needed
+                    Wr = (args.receiver or args.emitter)[0]
+                    Hr = (args.receiver or args.emitter)[1]
+                    dy, dz = get_receiver_offset(args)
+                    sampled = sample_receiver_field(Wr=Wr, Hr=Hr, dy=dy, dz=dz, ny=81, nz=61)
+                    if sampled is not None:
+                        Y, Z, F = sampled
+                        attach_grid_field(result, Y, Z, F)
+                        print(f"[plot] sampled coarse receiver field: shape={getattr(F,'shape',None)}")
+                    else:
+                        print("[plot] note: no receiver field was captured and sampler unavailable; heat-map may be empty")
+                except Exception as e:
+                    logger.debug("coarse sampler failed: %s", e)
         
         # Print and save results
         print_results(result, args)
@@ -369,68 +386,72 @@ def main_with_args(args) -> int:
         
         # Generate plots if requested
         if args.plot:
-            from .plotting import create_heatmap_plot
             from .util.paths import get_outdir
             # Re-assert outdir before any writers
             if hasattr(args, "_outdir_user"): args.outdir = args._outdir_user
             outdir = get_outdir(args.outdir)
-            create_heatmap_plot(result, args, result.get('grid_data'))
-            # Combined 2D geometry + heatmap (PNG) if requested
-            if getattr(args, "plot_geom", "2d") in ("2d", "both"):
+        # 2-D plotting when requested
+        plot_mode = getattr(args, "_plot_mode", "none")
+        if plot_mode in ("2d","both"):
+            try:
+                # Build receiver centre using the SAME offset logic used by the engine,
+                # so --emitter-offset (without --receiver-offset) works.
+                dy, dz = _resolve_offsets(args)  # receiver_center - emitter_center
+                from .viz.plots import plot_geometry_and_heatmap
+                from .util.filenames import join_with_ts
+                from .util.paths import get_outdir
+                raw = getattr(args, "_outdir_user", args.outdir)
+                out_png = join_with_ts(get_outdir(raw), "geom2d.png")
+                plot_geometry_and_heatmap(
+                    result={**result, **{
+                        "emitter_center": (float(args.setback), 0.0, 0.0),
+                        "receiver_center": (0.0, float(dy), float(dz)),
+                        "We": args.emitter[0], "He": args.emitter[1],
+                        "Wr": args.receiver[0], "Hr": args.receiver[1],
+                        "rotate_axis": getattr(args, "rotate_axis", "z"),
+                        "rotate_target": getattr(args, "rotate_target", "emitter"),
+                        "angle_pivot": getattr(args, "angle_pivot", "toe"),
+                        "angle": float(getattr(args, "angle", 0.0)),
+                    }},
+                    eval_mode=getattr(args, "eval_mode", getattr(args, "rc_mode", "center")),
+                    method=args.method,
+                    setback=float(args.setback),
+                    out_png=out_png,
+                )
+                print(f"Combined geometry/heatmap saved to: {out_png}")
+            except Exception as _e:
+                # Don't fail the run just because plotting failed
+                logger.warning(f"2D geometry/heatmap plot skipped: {_e}")
+        # 3-D plotting when requested
+        if plot_mode in ("3d","both"):
+            try:
+                from .viz.plot3d import geometry_3d_html
+                from .util.filenames import join_with_ts
+                from .util.paths import get_outdir
+                raw = getattr(args, "_outdir_user", args.outdir)
+                import numpy as _np
+                geom = result.get("geometry", {})
+                (We, He) = geom.get("emitter", args.emitter)
+                (Wr, Hr) = geom.get("receiver", args.receiver)
+                # Canonical centres (receiver at origin; emitter at +x=setback). Apply receiver offset dy,dz.
                 try:
-                    # Build receiver centre using the SAME offset logic used by the engine,
-                    # so --emitter-offset (without --receiver-offset) works.
-                    dy, dz = _resolve_offsets(args)  # receiver_center - emitter_center
-                    from .viz.plots import plot_geometry_and_heatmap
-                    from .util.filenames import join_with_ts
-                    from .util.paths import get_outdir
-                    raw = getattr(args, "_outdir_user", args.outdir)
-                    out_png = join_with_ts(get_outdir(raw), "geom2d.png")
-                    plot_geometry_and_heatmap(
-                        result={**result, **{
-                            "emitter_center": (float(args.setback), 0.0, 0.0),
-                            "receiver_center": (0.0, float(dy), float(dz)),
-                            "We": args.emitter[0], "He": args.emitter[1],
-                            "Wr": args.receiver[0], "Hr": args.receiver[1],
-                        }},
-                        eval_mode=getattr(args, "eval_mode", getattr(args, "rc_mode", "center")),
-                        method=args.method,
-                        setback=float(args.setback),
-                        out_png=out_png,
-                    )
-                    print(f"Combined geometry/heatmap saved to: {out_png}")
-                except Exception as _e:
-                    # Don't fail the run just because plotting failed
-                    logger.warning(f"2D geometry/heatmap plot skipped: {_e}")
-            # Interactive 3D (HTML) if requested
-            if getattr(args, "plot_geom", "2d") in ("3d", "both"):
-                try:
-                    from .viz.plot3d import geometry_3d_html
-                    from .util.filenames import join_with_ts
-                    from .util.paths import get_outdir
-                    raw = getattr(args, "_outdir_user", args.outdir)
-                    import numpy as _np
-                    geom = result.get("geometry", {})
-                    (We, He) = geom.get("emitter", args.emitter)
-                    (Wr, Hr) = geom.get("receiver", args.receiver)
-                    # Canonical centres (receiver at origin; emitter at +x=setback). Apply receiver offset dy,dz.
-                    try:
-                        dy, dz = _resolve_offsets(args)
-                    except Exception:
-                        dy = dz = 0.0
-                    E = (float(args.setback), 0.0, 0.0)
-                    R = (0.0, float(dy), float(dz))
-                    out_html = str(join_with_ts(get_outdir(raw), "geom3d.html"))
-                    geometry_3d_html(
-                        emitter_center=E, receiver_center=R,
-                        We=We, He=He, Wr=Wr, Hr=Hr,
-                        R_emitter=_np.eye(3), R_receiver=_np.eye(3),
-                        out_html=out_html, include_plotlyjs="cdn"
-                    )
-                except ImportError as _ie:
-                    logger.warning(str(_ie))
-                except Exception as _e:
-                    logger.warning(f"3D geometry plot skipped: {_e}")
+                    dy, dz = _resolve_offsets(args)
+                except Exception:
+                    dy = dz = 0.0
+                E = (float(args.setback), 0.0, 0.0)
+                R = (0.0, float(dy), float(dz))
+                out_html = str(join_with_ts(get_outdir(raw), "geom3d.html"))
+                geometry_3d_html(
+                    emitter_center=E, receiver_center=R,
+                    We=We, He=He, Wr=Wr, Hr=Hr,
+                    R_emitter=_np.eye(3), R_receiver=_np.eye(3),
+                    out_html=out_html, include_plotlyjs="cdn"
+                )
+                print(f"3D geometry scene saved to: {out_html}")
+            except ImportError as _ie:
+                logger.warning(str(_ie))
+            except Exception as _e:
+                logger.warning(f"3D geometry plot skipped: {_e}")
         
         return 0
         

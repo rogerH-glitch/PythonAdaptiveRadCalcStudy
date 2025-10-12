@@ -60,7 +60,7 @@ def _heatmap(ax, Y, Z, F, ypk, zpk, title="View Factor Heatmap"):
     ax.set_ylabel("Z (m)")
     ax.figure.colorbar(cs, ax=ax, label="View Factor")
 
-def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png):
+def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False):
     """
     Draw Plan (X–Y), Elevation (X–Z) wireframes (Emitter red, Receiver black) and the Y–Z heatmap.
     Uses centres & rotations from `result` if available; otherwise falls back to a canonical layout.
@@ -119,6 +119,8 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png):
           f"{method.title()} | Eval Mode: {eval_mode} | Setback: {setback:.3f} m"
     fig.suptitle(sup)
     fig.savefig(out_png, dpi=160, bbox_inches="tight")
+    if return_fig:
+        return fig, (ax_xy, ax_xz, ax_hm)
     plt.close(fig)
 
 

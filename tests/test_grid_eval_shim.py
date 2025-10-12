@@ -2,7 +2,7 @@ import numpy as np
 
 def test_grid_eval_shim_exports_tapped_impl():
     # Import via shim path
-    from src.grid_eval import evaluate_grid
+    from src.rc_eval.grid_eval import evaluate_grid
     # Drain tap before test (in case a prior test filled it)
     from src.util.grid_tap import drain
     drain()
@@ -21,5 +21,6 @@ def test_grid_eval_shim_exports_tapped_impl():
     assert tapped is not None, "Expected tapped field from evaluate_grid via shim"
     Yt, Zt, Ft = tapped
     assert Yt.shape == Y.shape and Zt.shape == Z.shape and Ft.shape == F.shape
+
 
 

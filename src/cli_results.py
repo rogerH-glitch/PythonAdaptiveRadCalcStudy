@@ -12,10 +12,14 @@ from typing import Dict, Any
 import argparse
 import logging
 from pathlib import Path
+from datetime import datetime, timezone
 from .util.paths import get_outdir
 
 logger = logging.getLogger(__name__)
 
+
+def _timestamp_iso_utc() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 def _csv_path(args, method_name: str) -> Path:
     # Honor the user's raw outdir; never trust mutated args.outdir
@@ -217,47 +221,43 @@ def print_results(result: Dict[str, Any], args: argparse.Namespace) -> None:
         print("="*50)
 
 
-def save_results(result: Dict[str, Any], args: argparse.Namespace) -> Path:
-    """Save calculation results to CSV file.
-    
-    Args:
-        result: Calculation results dictionary
-        args: Parsed command-line arguments
-        
-    Returns:
-        Path to the saved CSV file
-    """
-    # Generate output filename based on method
-    method = result['method']
-    csv_path = _csv_path(args, method)
-    
-    # Extract geometry and peak information
-    geom = result['geometry']
-    em_w, em_h = geom['emitter']
-    rc_w, rc_h = geom['receiver']
-    setback = geom['setback']
-    angle = geom['angle']
-    vf = result['vf']
-    x_peak = float(result.get('x_peak', 0.0))
-    y_peak = float(result.get('y_peak', 0.0))
-    rc_mode = result.get('rc_mode', 'center')
-    status = result.get('status', 'unknown')
-    
-    # Extract search metadata
-    search_metadata = result.get('search_metadata', {})
-    evaluations = search_metadata.get('evaluations', 0)
-    search_time = search_metadata.get('time_s', 0.0)
-    
-    # Write CSV with peak locator fields
-    try:
-        _write_csv_file(csv_path, method, em_w, em_h, rc_w, rc_h, setback, angle,
-                       vf, search_metadata, search_time)
-        return csv_path
-        
-    except PermissionError:
-        fallback_path = _write_csv_file_fallback(method, em_w, em_h, rc_w, rc_h, setback, angle,
-                                                vf, search_metadata, search_time, csv_path.parent)
-        return fallback_path
+def save_results(result: dict, args) -> Path:
+    csv_path = _csv_path(args, method_name=result.get("method", args.method))
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    # Append with timestamp
+    row = dict(result)
+    row["timestamp"] = _timestamp_iso_utc()
+    # Determine columns
+    if csv_path.exists():
+        with csv_path.open("r", newline="", encoding="utf-8") as f:
+            r = csv.reader(f)
+            try:
+                existing_headers = next(r)
+            except StopIteration:
+                existing_headers = []
+        headers = list(existing_headers) if existing_headers else list(row.keys())
+        # Ensure timestamp column exists and is first
+        headers = [h for h in headers if h != "timestamp"]
+        headers = ["timestamp"] + headers
+        # Fill missing keys
+        for k in row.keys():
+            if k not in headers:
+                headers.append(k)
+        write_header = existing_headers == []
+        mode = "a"
+    else:
+        # first write: put timestamp first
+        keys = list(row.keys())
+        keys.remove("timestamp")
+        headers = ["timestamp"] + keys
+        write_header = True
+        mode = "w"
+    with csv_path.open(mode, newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=headers)
+        if write_header:
+            w.writeheader()
+        w.writerow({k: row.get(k, "") for k in headers})
+    return csv_path
 
 
 def _write_csv_file(csv_path: Path, method: str, em_w: float, em_h: float, rc_w: float, 

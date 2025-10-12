@@ -147,13 +147,19 @@ Default assumptions:
     parser.add_argument(
         '--plot',
         action='store_true',
-        help='Generate plots'
+        help='Generate 2-D combined geometry+heatmap'
     )
     parser.add_argument(
-        '--plot-geom',
-        choices=('2d','3d','both','none'),
-        default='2d',
-        help="Geometry plotting mode: 2d (plan/elevation PNG), 3d (interactive HTML), both, or none (default: 2d)."
+        '--plot-3d',
+        dest="plot_3d",
+        action='store_true',
+        help='Generate 3-D interactive HTML only'
+    )
+    parser.add_argument(
+        '--plot-both',
+        dest="plot_both",
+        action='store_true',
+        help='Generate both 2-D combined PNG and 3-D HTML'
     )
     # Default to "results" so tests that inspect parser defaults pass
     _add_arg_unique(
@@ -470,6 +476,16 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
             args.init_grid_ny = n
         except ValueError:
             raise ValueError(f"Invalid init-grid format: {args.init_grid}. Expected format: N or NxM")
+    
+    # decide a single internal plot mode
+    if getattr(args, "plot_both", False):
+        args._plot_mode = "both"
+    elif getattr(args, "plot_3d", False):
+        args._plot_mode = "3d"
+    elif getattr(args, "plot", False):
+        args._plot_mode = "2d"
+    else:
+        args._plot_mode = "none"
     
     return args
 

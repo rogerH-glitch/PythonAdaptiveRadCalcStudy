@@ -18,8 +18,8 @@ def test_summary_hides_defaults(capsys):
     # Should NOT mention "Angle pivot"/"Rotate axis"/"Rotate target" or "Centres are aligned"
     assert "Rotate axis" not in out and "Angle pivot" not in out and "Rotate target" not in out
     assert "Centres are aligned" not in out
-    # Should mention equivalent receiver offset
-    assert "equivalent receiver offset" in out and "(-0.600, -0.400)" in out
+    # Should mention emitter offset
+    assert "Emitter offset (dy,dz)" in out and "(0.600, 0.400)" in out
 
 
 def test_legacy_heatmap_uses_YZ_and_marks_peak(tmp_path):

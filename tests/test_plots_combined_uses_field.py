@@ -4,7 +4,7 @@ matplotlib.use("Agg")
 from pathlib import Path
 
 def test_combined_plot_writes_when_field_present(tmp_path):
-    from src.plots import plot_geometry_and_heatmap
+    from src.viz.plots import plot_geometry_and_heatmap
     # minimal synthetic field
     y = np.linspace(-2, 2, 41)
     z = np.linspace(-1, 1, 21)

@@ -155,21 +155,36 @@ def _coarse_grid_search(
     # Create uniform grid over receiver
     x_coords = np.linspace(-rc_w/2, rc_w/2, grid_n)
     y_coords = np.linspace(-rc_h/2, rc_h/2, grid_n)
+    # Optional diagnostic field capture for plotting: build coarse (Y,Z,F)
+    try:
+        import numpy as _np
+        _Y, _Z = _np.meshgrid(x_coords, y_coords, indexing="xy")
+        _F = _np.empty_like(_Y, dtype=float)
+        _do_tap = True
+    except Exception:
+        _do_tap = False
     
     best_vf = -1.0
     best_x, best_y = 0.0, 0.0
     best_metadata = {}
     evaluations = 0
     
-    for x in x_coords:
-        for y in y_coords:
+    for j, y in enumerate(y_coords):
+        for i, x in enumerate(x_coords):
             vf, metadata = vf_evaluator(x, y)
             evaluations += 1
-            
+            if _do_tap:
+                _F[j, i] = float(vf)
             if vf > best_vf:
                 best_vf = vf
                 best_x, best_y = x, y
                 best_metadata = metadata
+    if _do_tap:
+        try:
+            from src.util.grid_tap import capture as _tap_capture  # local import to avoid hard dep
+            _tap_capture(_Y, _Z, _F)
+        except Exception:
+            pass
     
     return {
         "x_peak": best_x,
@@ -197,13 +212,29 @@ def _coarse_to_fine_search(
     y_coords = np.linspace(-rc_h/2, rc_h/2, grid_n)
     
     grid_values = []
+    # Optional diagnostic field capture for plotting: build coarse (Y,Z,F)
+    try:
+        import numpy as _np
+        _Y, _Z = _np.meshgrid(x_coords, y_coords, indexing="xy")
+        _F = _np.empty_like(_Y, dtype=float)
+        _do_tap = True
+    except Exception:
+        _do_tap = False
     best_metadata = {}
-    for x in x_coords:
-        for y in y_coords:
+    for j, y in enumerate(y_coords):
+        for i, x in enumerate(x_coords):
             vf, metadata = vf_evaluator(x, y)
             grid_values.append((vf, x, y))
+            if _do_tap:
+                _F[j, i] = float(vf)
             if vf > grid_values[0][0] if grid_values else True:  # Track best metadata
                 best_metadata = metadata
+    if _do_tap:
+        try:
+            from src.util.grid_tap import capture as _tap_capture  # local import to avoid hard dep
+            _tap_capture(_Y, _Z, _F)
+        except Exception:
+            pass
     
     # Sort by view factor (descending) and select top seeds
     grid_values.sort(key=lambda x: x[0], reverse=True)
