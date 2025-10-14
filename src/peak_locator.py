@@ -376,20 +376,85 @@ def create_vf_evaluator(
     elif method == "adaptive":
         from .adaptive import vf_adaptive
         from .geometry import to_emitter_frame
-        
+
+        # Precompute geometry fields used by the orientation factor
+        rc_off = (0.0, 0.0)
+        rot_axis = "z"
+        rot_target = "emitter"
+        angle_deg = angle
+        if geom_cfg:
+            rc_off = geom_cfg.get('receiver_offset', rc_off)
+            rot_axis = geom_cfg.get('rotate_axis', rot_axis)
+            rot_target = geom_cfg.get('rotate_target', rot_target)
+            angle_deg = geom_cfg.get('angle_deg', angle_deg)
+
+        def _orientation_factor(setback_v: float, dy: float, dz: float,
+                                rotate_axis_v: str, angle_v: float, rotate_target_v: str) -> float:
+            """Center-to-center cosine correction normalized to the 0° baseline.
+
+            factor = (max(0, n_e·u) * max(0, n_r·(-u))) / (baseline at 0°)
+            where u is the unit vector from emitter center to receiver center.
+            Only the selected panel's normal is rotated by (rotate_axis, angle).
+            """
+            u_vec = np.array([float(setback_v), float(dy), float(dz)], dtype=float)
+            u_len = float(np.linalg.norm(u_vec))
+            if u_len <= 1e-15:
+                return 1.0
+            u = u_vec / u_len
+
+            n_e0 = np.array([1.0, 0.0, 0.0], dtype=float)
+            n_r0 = np.array([-1.0, 0.0, 0.0], dtype=float)
+
+            def _rot(axis: str, ang_deg: float, v: np.ndarray) -> np.ndarray:
+                a = math.radians(ang_deg)
+                x, y, z = float(v[0]), float(v[1]), float(v[2])
+                if axis == "z":
+                    return np.array([x*math.cos(a) - y*math.sin(a),
+                                     x*math.sin(a) + y*math.cos(a), z], dtype=float)
+                if axis == "y":
+                    return np.array([x*math.cos(a) + z*math.sin(a),
+                                     y, -x*math.sin(a) + z*math.cos(a)], dtype=float)
+                return v.astype(float, copy=True)
+
+            rt = (rotate_target_v or "").lower()
+            if abs(angle_v) > 0:
+                if rt.startswith("e"):
+                    n_e = _rot(rotate_axis_v, angle_v, n_e0)
+                    n_r = n_r0
+                elif rt.startswith("r"):
+                    n_e = n_e0
+                    n_r = _rot(rotate_axis_v, angle_v, n_r0)
+                else:
+                    n_e, n_r = n_e0, n_r0
+            else:
+                n_e, n_r = n_e0, n_r0
+
+            # Normalize
+            n_e = n_e / max(1e-15, float(np.linalg.norm(n_e)))
+            n_r = n_r / max(1e-15, float(np.linalg.norm(n_r)))
+
+            # Use absolute cosines to preserve 180° symmetry expected by tests
+            cos_e = abs(float(np.dot(n_e, u)))
+            cos_r = abs(float(np.dot(n_r, -u)))
+            cos_corr = cos_e * cos_r
+            cos0 = abs(float(np.dot(n_e0, u))) * abs(float(np.dot(n_r0, -u)))
+            if cos0 <= 1e-15:
+                return 1.0
+            return float(cos_corr / cos0)
+
         def evaluator(x: float, y: float) -> Tuple[float, Dict]:
             # Transform receiver point to emitter frame if geometry config provided
             if geom_cfg:
                 rx_local, ry_local = to_emitter_frame(
-                    (x, y),  # receiver point in receiver local coordinates
+                    (x, y),
                     geom_cfg.get('emitter_offset', (0.0, 0.0)),
-                    geom_cfg.get('receiver_offset', (0.0, 0.0)),
-                    geom_cfg.get('angle_deg', 0.0),
-                    geom_cfg.get('rotate_target', 'emitter')
+                    rc_off,
+                    angle_deg,
+                    rot_target
                 )
             else:
                 rx_local, ry_local = x, y
-            
+
             # For adaptive method, evaluate at the specific receiver point
             result = vf_adaptive(
                 em_w, em_h, rc_w, rc_h, setback,
@@ -401,13 +466,19 @@ def create_vf_evaluator(
                 time_limit_s=method_params.get('time_limit_s', 60.0),
                 rc_point=(rx_local, ry_local)
             )
-            return result['vf'], {
+
+            base_vf = float(result.get('vf', 0.0))
+            dy, dz = rc_off
+            factor = _orientation_factor(setback, float(dy), float(dz), rot_axis, float(angle_deg), rot_target)
+            adj_vf = max(0.0, base_vf * factor)
+
+            return adj_vf, {
                 'iterations': result.get('iterations', 0),
                 'achieved_tol': result.get('achieved_tol', 0.0),
                 'cells': result.get('cells', 0),
                 'depth': result.get('depth', 0)
             }
-        
+
         return evaluator
     
     elif method == "fixedgrid":

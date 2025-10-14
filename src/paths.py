@@ -1,3 +1,10 @@
+import warnings
+
+warnings.warn(
+    "Module 'src.paths' is deprecated; use utilities under src.util.paths if needed. This shim will be removed in v1.2.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 from __future__ import annotations
 from pathlib import Path
 import os

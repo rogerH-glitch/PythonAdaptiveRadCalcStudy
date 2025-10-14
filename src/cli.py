@@ -17,7 +17,7 @@ from .cli_parser import create_parser, validate_args, normalize_args, map_eval_m
 from dataclasses import asdict
 from .cli_cases import run_cases
 from .cli_results import print_parsed_args, print_results, save_and_report_csv
-from .util.plot_payload import attach_grid_field
+from .util.plot_payload import attach_grid_field, attach_field_from_tap, has_field
 from .util.grid_tap import drain as _drain_grid
 from .util.offsets import get_receiver_offset
 from .viz.field_sampler import sample_receiver_field
@@ -43,6 +43,13 @@ def _ensure_headless_matplotlib():
             matplotlib.use("Agg")  # headless backend
     except Exception:
         pass
+
+
+def _want_plots(args) -> tuple[bool, bool]:
+    """Return (want_2d, want_3d) based on parsed args."""
+    want_2d = bool(args.plot) or bool(getattr(args, 'plot_both', False))
+    want_3d = bool(getattr(args, 'plot_3d', False)) or bool(getattr(args, 'plot_both', False))
+    return want_2d, want_3d
 
 
 def run_calculation(args) -> Dict[str, Any]:
@@ -350,14 +357,9 @@ def main_with_args(args) -> int:
             else:
                 # Fallback sampler (plotting only)
                 try:
-                    # Prefer receiver dims; fall back to emitter tuple if needed
-                    Wr = (args.receiver or args.emitter)[0]
-                    Hr = (args.receiver or args.emitter)[1]
-                    dy, dz = get_receiver_offset(args)
-                    sampled = sample_receiver_field(Wr=Wr, Hr=Hr, dy=dy, dz=dz, ny=81, nz=61)
-                    if sampled is not None:
-                        Y, Z, F = sampled
-                        attach_grid_field(result, Y, Z, F)
+                    result = sample_receiver_field(args, result)
+                    if has_field(result):
+                        F = result["F"]
                         print(f"[plot] sampled coarse receiver field: shape={getattr(F,'shape',None)}")
                     else:
                         print("[plot] note: no receiver field was captured and sampler unavailable; heat-map may be empty")
@@ -390,9 +392,28 @@ def main_with_args(args) -> int:
             # Re-assert outdir before any writers
             if hasattr(args, "_outdir_user"): args.outdir = args._outdir_user
             outdir = get_outdir(args.outdir)
+        # Determine what plots to generate
+        want_2d, want_3d = _want_plots(args)
+        
+        if want_2d or want_3d:
+            # Always try to attach field data from tap first
+            result = attach_field_from_tap(result)
+            
+            # If no field data, try fallback sampler
+            if not has_field(result):
+                try:
+                    result = sample_receiver_field(args, result)
+                    if has_field(result):
+                        F = result["F"]
+                        print(f"[plot] using fallback sampled field: shape={getattr(F, 'shape', None)}")
+                    else:
+                        print("[plot] note: no field data available; heatmap may be empty")
+                except Exception as e:
+                    logger.debug("fallback sampler failed: %s", e)
+                    print("[plot] note: no field data available; heatmap may be empty")
+        
         # 2-D plotting when requested
-        plot_mode = getattr(args, "_plot_mode", "none")
-        if plot_mode in ("2d","both"):
+        if want_2d:
             try:
                 # Build receiver centre using the SAME offset logic used by the engine,
                 # so --emitter-offset (without --receiver-offset) works.
@@ -422,36 +443,19 @@ def main_with_args(args) -> int:
             except Exception as _e:
                 # Don't fail the run just because plotting failed
                 logger.warning(f"2D geometry/heatmap plot skipped: {_e}")
+        
         # 3-D plotting when requested
-        if plot_mode in ("3d","both"):
+        if want_3d:
             try:
-                from .viz.plot3d import geometry_3d_html
+                from .viz.plot3d import plot_geometry_3d
                 from .util.filenames import join_with_ts
                 from .util.paths import get_outdir
                 raw = getattr(args, "_outdir_user", args.outdir)
-                import numpy as _np
-                geom = result.get("geometry", {})
-                (We, He) = geom.get("emitter", args.emitter)
-                (Wr, Hr) = geom.get("receiver", args.receiver)
-                # Canonical centres (receiver at origin; emitter at +x=setback). Apply receiver offset dy,dz.
-                try:
-                    dy, dz = _resolve_offsets(args)
-                except Exception:
-                    dy = dz = 0.0
-                E = (float(args.setback), 0.0, 0.0)
-                R = (0.0, float(dy), float(dz))
                 out_html = str(join_with_ts(get_outdir(raw), "geom3d.html"))
-                geometry_3d_html(
-                    emitter_center=E, receiver_center=R,
-                    We=We, He=He, Wr=Wr, Hr=Hr,
-                    R_emitter=_np.eye(3), R_receiver=_np.eye(3),
-                    out_html=out_html, include_plotlyjs="cdn"
-                )
-                print(f"3D geometry scene saved to: {out_html}")
-            except ImportError as _ie:
-                logger.warning(str(_ie))
+                plot_geometry_3d(result, out_html)
+                print(f"3-D interactive plot saved to: {out_html}")
             except Exception as _e:
-                logger.warning(f"3D geometry plot skipped: {_e}")
+                logger.warning(f"3D plot skipped: {_e}")
         
         return 0
         

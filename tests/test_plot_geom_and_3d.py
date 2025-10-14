@@ -13,17 +13,25 @@ def test_parser_has_plot_geom_flag():
 
 
 @pytest.mark.skipif(pytest.importorskip("plotly", reason="plotly not installed") is None, reason="plotly not installed")
-def test_geometry_3d_html_writes_file(tmp_path):
-    from src.viz.plot3d import geometry_3d_html
+def test_plot_geometry_3d_writes_file(tmp_path):
+    from src.viz.plot3d import plot_geometry_3d
     out_html = tmp_path / "geom.html"
-    path = geometry_3d_html(
-        emitter_center=(1.0,0.0,0.0),
-        receiver_center=(0.0,0.5,0.0),
-        We=5.0, He=2.0, Wr=5.0, Hr=2.0,
-        out_html=str(out_html),
-        include_plotlyjs="cdn",
-    )
-    assert Path(path).exists()
+    
+    # Create a result dictionary with the required fields
+    result = {
+        "We": 5.0, "He": 2.0, "Wr": 5.0, "Hr": 2.0,
+        "emitter_center": (1.0, 0.0, 0.0),
+        "receiver_center": (0.0, 0.5, 0.0),
+        "setback": 3.0,
+        "rotate_axis": "z",
+        "angle": 0.0,
+        "angle_pivot": "toe",
+        "rotate_target": "emitter",
+        "dy": 0.0, "dz": 0.0
+    }
+    
+    plot_geometry_3d(result, str(out_html))
+    assert out_html.exists()
     assert out_html.read_text(encoding="utf-8").lower().count("<html") >= 1
 
 

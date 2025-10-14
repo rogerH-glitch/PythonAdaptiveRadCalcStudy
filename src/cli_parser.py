@@ -5,12 +5,16 @@ This module handles argument parsing, validation, and normalization
 following the Single Responsibility Principle.
 """
 
+from __future__ import annotations
 import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Sequence
 import logging
+
+# Public constant so tests and other modules can assert the default.
+DEFAULT_EVAL_MODE = "grid"
 
 # -----------------------------------------------------------------------------
 # Parser that silently de-dupes duplicate option strings (e.g., --log-level)
@@ -43,12 +47,22 @@ def create_parser() -> argparse.ArgumentParser:
     parser = NoDupArgumentParser(
         description="Local Python tool for radiation view factor validation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=r"""
 Examples:
-  python main.py --method adaptive --emitter 5.1 2.1 --setback 1.0
-  python main.py --method fixedgrid --emitter 20.02 1.05 --setback 0.81 --plot
-  python main.py --method montecarlo --emitter 5.1 2.1 --receiver 4.0 1.8 --setback 2.0
-  python main.py --cases validation_cases.yaml --outdir ./output
+  # 2-D plot only (single line)
+  python main.py --method adaptive --emitter 5 2 --receiver 5 2 --setback 3 --eval-mode grid --plot
+
+  # Multi-line (POSIX shells use backslash \ )
+  python main.py \
+    --method adaptive \
+    --emitter 5 2 --receiver 5 2 --setback 3 \
+    --eval-mode grid --plot
+
+  # Multi-line (Windows PowerShell uses the backtick ` )
+  python main.py `
+    --method adaptive `
+    --emitter 5 2 --receiver 5 2 --setback 3 `
+    --eval-mode grid --plot
 
 Default assumptions:
   - Surfaces face each other, centres aligned
@@ -299,8 +313,8 @@ Default assumptions:
     peak_group.add_argument(
         '--eval-mode',
         choices=['center', 'grid', 'search'],
-        default=None,
-        help='Receiver evaluation mode: center (single point), grid (max over uniform grid), search (peak search)'
+        default=DEFAULT_EVAL_MODE,
+        help=f'Receiver evaluation mode: center (single point), grid (max over uniform grid), search (peak search) (default: {DEFAULT_EVAL_MODE})'
     )
     peak_group.add_argument(
         '--rc-mode',
@@ -499,11 +513,71 @@ def map_eval_mode_args(args: argparse.Namespace) -> None:
     eval_mode = getattr(args, 'eval_mode', None)
     rc_mode = getattr(args, 'rc_mode', None)
 
-    if not eval_mode:
-        # Adopt rc_mode (parser provides a default for rc_mode)
-        setattr(args, 'eval_mode', rc_mode or 'center')
-        if rc_mode is not None:
-            # Emit deprecation note similar to CLI entrypoint behaviour
-            print("[deprecation] --rc-mode is deprecated; use --eval-mode.", file=sys.stderr)
+    # Check if user explicitly provided --rc-mode by checking if it differs from default
+    rc_mode_explicit = rc_mode is not None and rc_mode != 'center'
+    
+    # If eval_mode is the default and rc_mode was explicitly provided, use rc_mode
+    if eval_mode == DEFAULT_EVAL_MODE and rc_mode_explicit:
+        setattr(args, 'eval_mode', rc_mode)
+        # Emit deprecation note similar to CLI entrypoint behaviour
+        print("[deprecation] --rc-mode is deprecated; use --eval-mode.", file=sys.stderr)
+    
     # Always mirror eval_mode back to rc_mode for downstream compatibility
     setattr(args, 'rc_mode', getattr(args, 'eval_mode'))
+
+
+def build_parser():
+    """
+    Return the project CLI parser.
+    Exposes DEFAULT_EVAL_MODE ('grid') for --eval-mode when not specified.
+    """
+    return create_parser()
+
+
+def parse_args(argv: Optional[Sequence[str]] = None):
+    """
+    Parse args and perform basic validation, raising SystemExit with
+    clear messages for common mistakes.
+    """
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    def _dim_ok(dest: str, label: str):
+        """
+        Validate a two-number flag like --emitter W H or --receiver W H if provided.
+        Treat absence as OK (defaults handled downstream).
+        """
+        vals = getattr(args, dest.replace("-", "_"), None)
+        if vals is None:
+            return
+        # e.g. vals == [W, H] from nargs=2
+        if isinstance(vals, (list, tuple)) and len(vals) == 2:
+            w, h = vals
+            try:
+                w = float(w)
+                h = float(h)
+            except (TypeError, ValueError):
+                parser.error(f"--{dest} expects two numbers (W H)")
+            if w <= 0 or h <= 0:
+                parser.error(f"--{dest} values must be > 0 (got {w}, {h})")
+        # else: ignore (another component may parse/normalize)
+
+    # Validate sizes
+    _dim_ok("emitter", "emitter")
+    _dim_ok("receiver", "receiver")
+
+    # Treat missing/None setback as default 1.0 for validation purposes
+    _sb = getattr(args, "setback", None)
+    try:
+        sb_val = 1.0 if _sb is None else float(_sb)
+    except (TypeError, ValueError):
+        parser.error("--setback must be a positive number")
+    if sb_val <= 0:
+        parser.error("--setback must be > 0")
+
+    # Validate offsets: if both emitter-offset and receiver-offset are given, allow but warn via help text
+    # (no hard error; downstream determines precedence). If you'd prefer hard error, uncomment below:
+    # if args.emitter_offset and args.receiver_offset:
+    #     parser.error("Specify only one of --emitter-offset or --receiver-offset.")
+
+    return args

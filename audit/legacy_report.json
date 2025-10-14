@@ -1,0 +1,33 @@
+{
+  "summary": {
+    "python_files_scanned": 29,
+    "no_inbound_modules": 5,
+    "never_imported_by_tests": 5,
+    "duplicate_helpers_in_viz": 2
+  },
+  "no_inbound_modules": [
+    "src.cli_cases",
+    "src.constants",
+    "src.orientation",
+    "src.paths",
+    "src.util.offsets"
+  ],
+  "never_imported_by_tests": [
+    "src.cli_cases",
+    "src.constants",
+    "src.orientation",
+    "src.paths",
+    "src.util.offsets"
+  ],
+  "duplicate_helpers": {
+    "compute_panel_corners": [
+      "src\\viz\\display_geom.py",
+      "src\\viz\\display_geom.py",
+      "src\\viz\\display_geom.py"
+    ],
+    "__init__": [
+      "src\\viz\\plot3d.py",
+      "src\\viz\\plots.py"
+    ]
+  }
+}

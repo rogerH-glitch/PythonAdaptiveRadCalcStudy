@@ -5,7 +5,7 @@ A local Python tool for calculating local peak view factors between rectangular
 surfaces under fire conditions using multiple numerical methods.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.2"
 __author__ = "Fire Safety Engineer"
 
 # Import only what's currently implemented

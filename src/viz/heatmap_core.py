@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional, Tuple
 import numpy as np
+from src.util.plot_payload import has_field
 
 
 def _compute_limits(F: np.ndarray, vmin: float | None, vmax: float | None) -> Tuple[float, float]:
@@ -58,6 +59,20 @@ def render_receiver_heatmap(
                     bbox=dict(facecolor="white", alpha=0.75, edgecolor="none", pad=2),
                     fontsize=9)
     return cs, vmin, vmax
+
+
+def draw_heatmap(ax, Y, Z, F, *, ypk=None, zpk=None):
+    """
+    Draw a true-scale receiver heatmap; Y (width-axis), Z (height-axis).
+    """
+    # Avoid ambiguous truth on numpy arrays; validate shape/size
+    if not has_field({"Y": Y, "Z": Z, "F": F}):
+        ax.text(0.5, 0.5, "No field data available", ha="center", va="center",
+                transform=ax.transAxes)
+        return
+    
+    # Use the existing render_receiver_heatmap function for actual drawing
+    render_receiver_heatmap(ax, Y, Z, F, ypk=ypk, zpk=zpk)
 
 
 

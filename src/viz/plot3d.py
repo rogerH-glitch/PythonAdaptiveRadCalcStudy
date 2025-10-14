@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from .display_geom import build_display_geom
 
 
 def _title_from_result(result: dict) -> str:
@@ -17,29 +18,48 @@ def _title_from_result(result: dict) -> str:
 def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False):
     import plotly.graph_objects as go
     
-    # Extract geometry parameters
-    We = float(result.get("We", 5.0))
-    He = float(result.get("He", 2.0))
-    Wr = float(result.get("Wr", 5.0))
-    Hr = float(result.get("Hr", 2.0))
-    setback = float(result.get("setback", 3.0))
+    # Create a mock args object for build_display_geom
+    class MockArgs:
+        def __init__(self, result):
+            self.emitter = (result.get("We", 5.0), result.get("He", 2.0))
+            self.receiver = (result.get("Wr", 5.0), result.get("Hr", 2.0))
+            self.setback = result.get("setback", 3.0)
+            self.rotate_axis = result.get("rotate_axis", "z")
+            self.angle = result.get("angle", 0.0)
+            self.angle_pivot = result.get("angle_pivot", "toe")
+            self.rotate_target = result.get("rotate_target", "emitter")
     
-    # Get centers and offsets
-    em_center = result.get("emitter_center", (0.0, 0.0, 0.0))
-    rc_center = result.get("receiver_center", (setback, 0.0, 0.0))
+    args = MockArgs(result)
+    display_geom = build_display_geom(args, result)
     
-    # Create wireframe traces
+    # Create wireframe traces using display geometry
     traces = []
-    
+
+    def _maybe_to_xyz_lists(corners):
+        """
+        Accept np.ndarray shape (N,3) or list of (x,y,z) and return 3 lists (x,y,z).
+        Returns (None, None, None) if corners is falsy or empty.
+        """
+        if corners is None:
+            return None, None, None
+        arr = np.asarray(corners)
+        if arr.size == 0 or arr.ndim != 2 or arr.shape[1] != 3:
+            return None, None, None
+        x, y, z = arr[:, 0].tolist(), arr[:, 1].tolist(), arr[:, 2].tolist()
+        x.append(x[0]); y.append(y[0]); z.append(z[0])
+        return x, y, z
+
     # Emitter trace (red)
-    xE, yE, zE = _rect_wire_points(em_center, We, He)
-    traces.append(go.Scatter3d(x=xE, y=yE, z=zE, mode="lines",
-                               line=dict(width=6, color="red"), name="Emitter"))
-    
+    xE, yE, zE = _maybe_to_xyz_lists(display_geom.get("corners3d", {}).get("emitter"))
+    if xE is not None:
+        traces.append(go.Scatter3d(x=xE, y=yE, z=zE, mode="lines",
+                                   line=dict(width=6, color="red"), name="Emitter"))
+
     # Receiver trace (black)
-    xR, yR, zR = _rect_wire_points(rc_center, Wr, Hr)
-    traces.append(go.Scatter3d(x=xR, y=yR, z=zR, mode="lines",
-                               line=dict(width=6, color="black"), name="Receiver"))
+    xR, yR, zR = _maybe_to_xyz_lists(display_geom.get("corners3d", {}).get("receiver"))
+    if xR is not None:
+        traces.append(go.Scatter3d(x=xR, y=yR, z=zR, mode="lines",
+                                   line=dict(width=6, color="black"), name="Receiver"))
     
     # Create figure with title
     fig = go.Figure(data=traces)
@@ -50,48 +70,3 @@ def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False):
     fig.write_html(out_html, include_plotlyjs="cdn")
     if return_fig:
         return fig
-
-
-def _rect_wire_points(center_xyz, w, h, R=np.eye(3)):
-    """Return X,Y,Z arrays for a rectangle wireframe lying in local Y–Z at x=0, rotated by R, translated to center."""
-    c = np.array([[0, -w/2, -h/2],
-                  [0,  w/2, -h/2],
-                  [0,  w/2,  h/2],
-                  [0, -w/2,  h/2],
-                  [0, -w/2, -h/2]], dtype=float)
-    pts = (np.asarray(R, float) @ c.T).T + np.asarray(center_xyz, float)
-    return pts[:, 0], pts[:, 1], pts[:, 2]
-
-
-def geometry_3d_html(*, emitter_center, receiver_center, We, He, Wr, Hr,
-                     R_emitter=None, R_receiver=None, out_html="geometry_3d.html",
-                     include_plotlyjs="cdn") -> str:
-    """
-    Save an interactive 3-D HTML showing emitter (red) and receiver (black) wireframes.
-    Returns the output path. If plotly is missing, raises ImportError.
-    - include_plotlyjs: 'cdn' (smaller file) or 'inline' (offline, bigger file).
-    """
-    try:
-        import plotly.graph_objects as go
-    except Exception as e:
-        raise ImportError("Plotly is required for 3-D output. Try: pip install plotly") from e
-
-    if R_emitter is None:
-        R_emitter = np.eye(3)
-    if R_receiver is None:
-        R_receiver = np.eye(3)
-
-    xE, yE, zE = _rect_wire_points(emitter_center, We, He, R_emitter)
-    xR, yR, zR = _rect_wire_points(receiver_center, Wr, Hr, R_receiver)
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter3d(x=xE, y=yE, z=zE, mode="lines",
-                               line=dict(width=6, color="red"), name="Emitter"))
-    fig.add_trace(go.Scatter3d(x=xR, y=yR, z=zR, mode="lines",
-                               line=dict(width=6, color="black"), name="Receiver"))
-    fig.update_layout(scene_aspectmode="data",
-                      legend=dict(orientation="h", y=1.02, x=0.0))
-    fig.write_html(out_html, include_plotlyjs=include_plotlyjs)
-    return out_html
-
-

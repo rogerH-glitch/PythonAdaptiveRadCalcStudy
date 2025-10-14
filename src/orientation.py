@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
+import warnings
 import math
 import numpy as np
 
@@ -13,6 +14,11 @@ class Frame:
     W: float
     H: float
     S: float             # receiver plane x = S
+warnings.warn(
+    "Module 'src.orientation' is deprecated and will be replaced by geometry utils and display-based transforms in v1.2.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 def _rot_z(theta: float):

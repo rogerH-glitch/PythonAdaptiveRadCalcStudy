@@ -1,4 +1,11 @@
 from __future__ import annotations
+import warnings
+
+warnings.warn(
+    "Module 'src.util.offsets' is deprecated; offset extraction has moved into src.viz.geometry_utils (translate_to_setback/extract offsets). This shim will be removed in v1.2.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 from typing import Tuple
 
 def get_receiver_offset(args) -> Tuple[float, float]:

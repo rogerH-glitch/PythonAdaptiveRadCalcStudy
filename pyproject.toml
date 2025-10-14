@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "viewfactor-validation"
-version = "1.0.1"
+version = "1.0.2"
 description = "Local Python tool for radiation view factor validation in fire safety engineering"
 readme = "README.md"
 license = {text = "MIT"}
@@ -32,8 +32,11 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "black>=23.0.0",
+    "ruff>=0.6.8",
     "flake8>=6.0.0",
     "mypy>=1.0.0",
+    "isort>=5.13.2",
+    "pre-commit>=3.7.0",
 ]
 
 [project.urls]
@@ -80,6 +83,14 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.isort]
+profile = "black"
+line_length = 88
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

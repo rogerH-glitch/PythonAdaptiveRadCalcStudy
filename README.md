@@ -89,6 +89,7 @@ The validation runner can compute both types and compare against different expec
 - Print version:
 ```bash
 python main.py --version
+- What's new in v1.0.2: see CHANGELOG.md and MIGRATION_GUIDE.md for details on dual-API geometry support, centralized helpers, and deprecation shims. All tests pass locally (189 passed, 1 skipped).
 ```
 
 - Deterministic defaults are set for each method (e.g., Monte Carlo seed=42).

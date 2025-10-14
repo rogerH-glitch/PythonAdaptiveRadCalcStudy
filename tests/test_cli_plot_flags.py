@@ -30,7 +30,7 @@ def test_cli_calls_correct_plotters(monkeypatch, tmp_path):
     import src.viz.plots as plots_module
     import src.viz.plot3d as plot3d_module
     monkeypatch.setattr(plots_module, "plot_geometry_and_heatmap", fake_2d)
-    monkeypatch.setattr(plot3d_module, "geometry_3d_html", fake_3d)
+    monkeypatch.setattr(plot3d_module, "plot_geometry_3d", fake_3d)
     
     # Test the plotting logic directly
     result = {"method":"adaptive","vf":0.1}

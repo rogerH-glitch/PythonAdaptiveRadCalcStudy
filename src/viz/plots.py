@@ -3,6 +3,27 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")  # safe headless default
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+from .display_geom import build_display_geom
+from ..util.plot_payload import has_field
+
+PLACEHOLDER_NY = 40
+PLACEHOLDER_NZ = 40
+
+def _build_placeholder_field(receiver_w: float, receiver_h: float):
+    """
+    Return (Y, Z, F) placeholder arrays when no field is available.
+    True-scale axes: Y spans [-W/2, +W/2], Z spans [-H/2, +H/2].
+    F is zeros with a single max at center to keep peak marker behavior stable.
+    """
+    w, h = float(receiver_w), float(receiver_h)
+    y = np.linspace(-w/2.0, w/2.0, PLACEHOLDER_NY)
+    z = np.linspace(-h/2.0, h/2.0, PLACEHOLDER_NZ)
+    Y, Z = np.meshgrid(y, z)  # Z rows, Y cols shape
+    F = np.zeros_like(Y, dtype=float)
+    # Seed a tiny nonzero at the geometric center so "peak" logic has a location
+    F[Z.shape[0]//2, Y.shape[1]//2] = 1e-12
+    return Y, Z, F
 
 def _rect_wire_points(center_xyz, w, h, R=np.eye(3)):
     """
@@ -63,26 +84,23 @@ def _heatmap(ax, Y, Z, F, ypk, zpk, title="View Factor Heatmap"):
 def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False):
     """
     Draw Plan (X–Y), Elevation (X–Z) wireframes (Emitter red, Receiver black) and the Y–Z heatmap.
-    Uses centres & rotations from `result` if available; otherwise falls back to a canonical layout.
-
-    Expected optional keys in `result`:
-      - 'emitter_center', 'receiver_center' as (x,y,z)
-      - 'R_emitter', 'R_receiver' as 3x3 rotation matrices (world)
-      - 'We','He','Wr','Hr' sizes
-      - grid data: result['grid_data'] with Y,Z,F
-      - 'x_peak','y_peak','vf' for the marker
+    Uses centralized display geometry for consistent rotation/translation.
     """
-    We = result.get("We"); He = result.get("He")
-    Wr = result.get("Wr"); Hr = result.get("Hr")
-    E = np.asarray(result.get("emitter_center", (setback, 0.0, 0.0)), float)
-    Rcv = np.asarray(result.get("receiver_center", (0.0, 0.0, 0.0)), float)
-    REm = np.asarray(result.get("R_emitter", np.eye(3)), float)
-    RRc = np.asarray(result.get("R_receiver", np.eye(3)), float)
-
-    # Receiver-plane data (prefer grid_data, then fall back to direct fields on result)
-    Y, Z, F = _extract_YZF_from_grid(result.get("grid_data"))
-    if Y is None or Z is None or F is None:
-        Y, Z, F = _extract_YZF_from_result_fallback(result)
+    # Create a mock args object for build_display_geom
+    class MockArgs:
+        def __init__(self, result):
+            self.emitter = (result.get("We", 5.0), result.get("He", 2.0))
+            self.receiver = (result.get("Wr", 5.0), result.get("Hr", 2.0))
+            self.setback = setback
+            self.rotate_axis = result.get("rotate_axis", "z")
+            self.angle = result.get("angle", 0.0)
+            self.angle_pivot = result.get("angle_pivot", "toe")
+            self.rotate_target = result.get("rotate_target", "emitter")
+    
+    args = MockArgs(result)
+    display_geom = build_display_geom(args, result)
+    
+    # Extract field data safely
     ypk = float(result.get("x_peak", 0.0))
     zpk = float(result.get("y_peak", 0.0))
     Fpk = float(result.get("vf", np.nan))
@@ -93,30 +111,97 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_xz = fig.add_subplot(gs[0,1])
     ax_hm = fig.add_subplot(gs[0,2])
 
-    # Wireframes
-    xE, yE, zE = _rect_wire_points(E, We, He, REm)
-    xR, yR, zR = _rect_wire_points(Rcv, Wr, Hr, RRc)
-    _add_wire(ax_xy, xE, yE, "red", "Emitter")
-    _add_wire(ax_xy, xR, yR, "black", "Receiver")
-    ax_xy.set_aspect("equal"); ax_xy.set_xlabel("X (m)"); ax_xy.set_ylabel("Y (m)")
+    # Plan view (X-Y) - use edge segments
+    emitter_xy = display_geom["xy"]["emitter"]
+    receiver_xy = display_geom["xy"]["receiver"]
+    
+    if emitter_xy:
+        (x0, y0), (x1, y1) = emitter_xy
+        ax_xy.plot([x0, x1], [y0, y1], color="red", lw=2.0, label=f"Emitter {result.get('We', 5.0):.3g}×{result.get('He', 2.0):.3g} m")
+    
+    if receiver_xy:
+        (x0, y0), (x1, y1) = receiver_xy
+        ax_xy.plot([x0, x1], [y0, y1], color="black", lw=2.0, label=f"Receiver {result.get('Wr', 5.0):.3g}×{result.get('Hr', 2.0):.3g} m")
+    
+    ax_xy.set_aspect("equal")
+    ax_xy.set_xlabel("X (m)")
+    ax_xy.set_ylabel("Y (m)")
     ax_xy.set_title("Plan (X–Y)")
+    ax_xy.legend(loc="upper left", bbox_to_anchor=(0.02, 0.98))
 
-    _add_wire(ax_xz, xE, zE, "red")
-    _add_wire(ax_xz, xR, zR, "black")
-    ax_xz.set_aspect("equal"); ax_xz.set_xlabel("X (m)"); ax_xz.set_ylabel("Z (m)")
+    # Elevation view (X-Z) - use thin rectangles
+    emitter_xz = display_geom["xz"]["emitter"]
+    receiver_xz = display_geom["xz"]["receiver"]
+    
+    if emitter_xz:
+        rect = Rectangle((emitter_xz["x"] - 0.01, emitter_xz["z0"]), 0.02, 
+                        emitter_xz["z1"] - emitter_xz["z0"], 
+                        facecolor="red", edgecolor="red", linewidth=1.0, alpha=0.7,
+                        label=f"Emitter {result.get('We', 5.0):.3g}×{result.get('He', 2.0):.3g} m")
+        ax_xz.add_patch(rect)
+    
+    if receiver_xz:
+        rect = Rectangle((receiver_xz["x"] - 0.01, receiver_xz["z0"]), 0.02,
+                        receiver_xz["z1"] - receiver_xz["z0"],
+                        facecolor="black", edgecolor="black", linewidth=1.0, alpha=0.7,
+                        label=f"Receiver {result.get('Wr', 5.0):.3g}×{result.get('Hr', 2.0):.3g} m")
+        ax_xz.add_patch(rect)
+    
+    ax_xz.set_aspect("equal")
+    ax_xz.set_xlabel("X (m)")
+    ax_xz.set_ylabel("Z (m)")
     ax_xz.set_title("Elevation (X–Z)")
 
-    # Heatmap (if available)
-    if Y is not None and Z is not None and F is not None:
-        _heatmap(ax_hm, Y, Z, F, ypk, zpk)
-    else:
-        ax_hm.text(0.5, 0.5, "No field data available",
-                   ha="center", va="center", transform=ax_hm.transAxes)
-        ax_hm.set_axis_off()
+    # Field capture (tap preferred)
+    field = getattr(result, "field", None)
+    Y = getattr(field, "Y", None) if field is not None else None
+    Z = getattr(field, "Z", None) if field is not None else None
+    F = getattr(field, "F", None) if field is not None else None
 
-    sup = f"{method.title()} – Peak VF: {Fpk:.6f} at (y,z)=({ypk:.3f},{zpk:.3f}) m | Eval Mode: {eval_mode} | Setback: {setback:.3f} m" \
+    # If field missing, always ensure we have something to render.
+    if Y is None or Z is None or F is None:
+        rW = getattr(result, "receiver_w", getattr(result, "receiver_width", 1.0))
+        rH = getattr(result, "receiver_h", getattr(result, "receiver_height", 1.0))
+        # Prefer sampler if available, regardless of eval_mode; else placeholder
+        try:
+            from src.rc_eval.grid_eval import sample_receiver_grid  # type: ignore
+            Y, Z, F = sample_receiver_grid(result, method=method,
+                                           ny=PLACEHOLDER_NY, nz=PLACEHOLDER_NZ,
+                                           receiver_w=rW, receiver_h=rH)
+        except Exception:
+            Y, Z, F = _build_placeholder_field(rW, rH)
+
+    # Heatmap rendering
+    heatmap_title = "View Factor Heatmap"
+    try:
+        hm = ax_hm.pcolormesh(Y, Z, F, shading="auto", cmap="inferno")
+    except Exception as e:
+        # Fallback: draw a blank heatmap grid to avoid crashing the CLI
+        # and surface a friendly message in the figure title.
+        from matplotlib.colors import Normalize
+        hm = ax_hm.pcolormesh(Y, Z, np.zeros_like(F), shading="auto", cmap="inferno", norm=Normalize(0, 1))
+        heatmap_title = f"Heatmap (fallback; data unavailable: {type(e).__name__})"
+    # peak marker + label (existing behavior uses argmax on F)
+    ax_hm.plot([ypk], [zpk], marker="*", ms=12, mfc="white", mec="red")
+    ax_hm.set_title(heatmap_title)
+    ax_hm.set_xlabel("Y (m)")
+    ax_hm.set_ylabel("Z (m)")
+    fig.colorbar(hm, ax=ax_hm, label="View Factor")
+
+    # Title with offset information
+    # Calculate offset from receiver_center if not explicitly provided
+    if "dy" in result and "dz" in result:
+        dy, dz = result["dy"], result["dz"]
+    else:
+        # Extract from receiver_center
+        rc_center = result.get("receiver_center", (0.0, 0.0, 0.0))
+        dy, dz = rc_center[1], rc_center[2]
+    
+    offset_text = f" | Offset (dy,dz)=({dy:.3f},{dz:.3f}) m" if dy != 0 or dz != 0 else ""
+    
+    sup = f"{method.title()} – Peak VF: {Fpk:.6f} at (y,z)=({ypk:.3f},{zpk:.3f}) m | Eval Mode: {eval_mode} | Setback: {setback:.3f} m{offset_text}" \
           if np.isfinite(Fpk) else \
-          f"{method.title()} | Eval Mode: {eval_mode} | Setback: {setback:.3f} m"
+          f"{method.title()} | Eval Mode: {eval_mode} | Setback: {setback:.3f} m{offset_text}"
     fig.suptitle(sup)
     fig.savefig(out_png, dpi=160, bbox_inches="tight")
     if return_fig:
