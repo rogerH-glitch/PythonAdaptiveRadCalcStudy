@@ -415,27 +415,32 @@ def main_with_args(args) -> int:
         # Run calculation
         result = run_calculation(args)
 
-        # If solver captured a field, attach it; else sample a coarse field for plotting only
+        # Check if we already have field data from run_calculation
         if getattr(args, "eval_mode", None) in ("grid", "search"):
-            tapped = _drain_grid()
-            if tapped is not None:
-                Y, Z, F = tapped
-                try:
-                    attach_grid_field(result, Y, Z, F)
-                    print(f"[plot] using captured field: shape={getattr(F, 'shape', None)}")
-                except Exception as _e:
-                    logger.debug("attach_grid_field skipped: %s", _e)
+            if has_field(result):
+                F = result["F"]
+                print(f"[plot] using dense grid field: shape={getattr(F, 'shape', None)}")
             else:
-                # Fallback sampler (plotting only)
-                try:
-                    result = sample_receiver_field(args, result)
-                    if has_field(result):
-                        F = result["F"]
-                        print(f"[plot] sampled coarse receiver field: shape={getattr(F,'shape',None)}")
-                    else:
-                        print("[plot] note: no receiver field was captured and sampler unavailable; heat-map may be empty")
-                except Exception as e:
-                    logger.debug("coarse sampler failed: %s", e)
+                # Try to get field from tap as fallback
+                tapped = _drain_grid()
+                if tapped is not None:
+                    Y, Z, F = tapped
+                    try:
+                        attach_grid_field(result, Y, Z, F)
+                        print(f"[plot] using captured field: shape={getattr(F, 'shape', None)}")
+                    except Exception as _e:
+                        logger.debug("attach_grid_field skipped: %s", _e)
+                else:
+                    # Fallback sampler (plotting only)
+                    try:
+                        result = sample_receiver_field(args, result)
+                        if has_field(result):
+                            F = result["F"]
+                            print(f"[plot] sampled coarse receiver field: shape={getattr(F,'shape',None)}")
+                        else:
+                            print("[plot] note: no receiver field was captured and sampler unavailable; heat-map may be empty")
+                    except Exception as e:
+                        logger.debug("coarse sampler failed: %s", e)
         
         # Print and save results
         print_results(result, args)
@@ -511,8 +516,8 @@ def main_with_args(args) -> int:
                     out_png=out_png,
                     # Prefer using attached/captured grid field when available
                     vf_field=result.get("F", None),
-                    vf_grid={"y": result.get("Yy", result.get("grid_y")),
-                             "z": result.get("Zz", result.get("grid_z"))},
+                    vf_grid={"y": result.get("grid_y"),
+                             "z": result.get("grid_z")},
                     prefer_eval_field=True,
                 )
                 print(f"Combined geometry/heatmap saved to: {out_png}")

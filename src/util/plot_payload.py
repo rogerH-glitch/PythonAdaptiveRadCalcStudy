@@ -17,6 +17,16 @@ def attach_grid_field(result: Dict[str, Any], Y, Z, F) -> None:
     result["Y"] = Y
     result["Z"] = Z
     result["F"] = F
+    
+    # Also store 1D grid arrays for plotting compatibility
+    if Y.ndim == 2 and Z.ndim == 2:
+        # Extract 1D arrays from 2D meshgrid
+        result["grid_y"] = Y[0, :]  # First row of Y meshgrid
+        result["grid_z"] = Z[:, 0]  # First column of Z meshgrid
+    else:
+        # Already 1D arrays
+        result["grid_y"] = Y
+        result["grid_z"] = Z
 
 def attach_field_from_tap(result: Dict[str, Any]) -> Dict[str, Any]:
     """Try to attach field data from the grid tap, return updated result."""
