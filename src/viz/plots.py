@@ -176,15 +176,24 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
         zpk = float(result.get("y_peak", 0.0))
     Fpk = float(result.get("vf", np.nan))
 
-    fig = plt.figure(figsize=(14, 4.5))
-    try:
-        fig.set_constrained_layout(True)
-    except Exception:
-        pass
-    gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.0, 1.3], wspace=0.35)
-    ax_xy = fig.add_subplot(gs[0,0])
-    ax_xz = fig.add_subplot(gs[0,1])
-    ax_hm = fig.add_subplot(gs[0,2])
+    # --- G1: layout & scaling ---
+    # Larger canvas with tuned widths; preserve true scale within axes
+    fig = plt.figure(
+        figsize=(17, 5.5),
+        constrained_layout=True,
+        dpi=plt.rcParams.get("figure.dpi", 100),
+    )
+    gs = fig.add_gridspec(
+        nrows=1,
+        ncols=4,                 # XY, XZ, Heatmap, Colorbar
+        width_ratios=[1.2, 1.0, 1.8, 0.08],
+        wspace=0.15,
+    )
+    ax_xy = fig.add_subplot(gs[0, 0])   # Plan (X–Y)
+    ax_xz = fig.add_subplot(gs[0, 1])   # Elevation (X–Z)
+    ax_hm = fig.add_subplot(gs[0, 2])   # Heatmap (Y–Z)
+    cax   = fig.add_subplot(gs[0, 3])   # Colorbar axis
+    # --- end G1 ---
 
     # Plan view (X-Y) - use edge segments
     emitter_xy = display_geom["xy"]["emitter"]
@@ -387,7 +396,7 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_hm.set_title(heatmap_title)
     ax_hm.set_xlabel("Y (m)")
     ax_hm.set_ylabel("Z (m)")
-    fig.colorbar(hm, ax=ax_hm, label="View Factor")
+    fig.colorbar(hm, cax=cax, label="View Factor")
 
     # Plausibility check for accidental re-normalisation
     try:
