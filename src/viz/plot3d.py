@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from .display_geom import build_display_geom
+from .display_geom import build_display_geom, _order_quad
 
 
 def _title_from_result(result: dict) -> str:
@@ -49,17 +49,27 @@ def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False):
         x.append(x[0]); y.append(y[0]); z.append(z[0])
         return x, y, z
 
-    # Emitter trace (red)
-    xE, yE, zE = _maybe_to_xyz_lists(display_geom.get("corners3d", {}).get("emitter"))
-    if xE is not None:
-        traces.append(go.Scatter3d(x=xE, y=yE, z=zE, mode="lines",
-                                   line=dict(width=6, color="red"), name="Emitter"))
+    # Get and order corners for proper rectangle rendering
+    emitter_corners = display_geom.get("corners3d", {}).get("emitter")
+    receiver_corners = display_geom.get("corners3d", {}).get("receiver")
+    
+    if emitter_corners is not None:
+        # Convert list to numpy array and take first 4 points (remove duplicates)
+        em_array = np.array(emitter_corners[:4])  # shape (4,3), values unmodified
+        em = _order_quad(em_array)
+        xE, yE, zE = _maybe_to_xyz_lists(em)
+        if xE is not None:
+            traces.append(go.Scatter3d(x=xE, y=yE, z=zE, mode="lines",
+                                       line=dict(width=6, color="red"), name="Emitter"))
 
-    # Receiver trace (black)
-    xR, yR, zR = _maybe_to_xyz_lists(display_geom.get("corners3d", {}).get("receiver"))
-    if xR is not None:
-        traces.append(go.Scatter3d(x=xR, y=yR, z=zR, mode="lines",
-                                   line=dict(width=6, color="black"), name="Receiver"))
+    if receiver_corners is not None:
+        # Convert list to numpy array and take first 4 points (remove duplicates)
+        rc_array = np.array(receiver_corners[:4])  # shape (4,3)
+        rc = _order_quad(rc_array)
+        xR, yR, zR = _maybe_to_xyz_lists(rc)
+        if xR is not None:
+            traces.append(go.Scatter3d(x=xR, y=yR, z=zR, mode="lines",
+                                       line=dict(width=6, color="black"), name="Receiver"))
     
     # Create figure with title
     fig = go.Figure(data=traces)
