@@ -10,7 +10,7 @@ from src.viz.display_geom import build_display_geom
 from src.viz.plots import plot_geometry_and_heatmap
 
 
-@pytest.mark.xfail(reason="XZ legend overlaps with plot area instead of appearing below it")
+# @pytest.mark.xfail(reason="XZ legend overlaps with plot area instead of appearing below it")  # FIXED
 def test_xz_legend_below_axes():
     """Test that XZ legend bbox y-coordinate < 0 in axes coordinates."""
     # Create geometry
@@ -35,16 +35,12 @@ def test_xz_legend_below_axes():
     assert xz_legend is not None, "XZ legend not found"
     
     # Get legend bbox in axes coordinates
-    bbox = xz_legend.get_bbox_to_anchor()
-    if bbox is None:
-        # If bbox_to_anchor is None, get the legend position
-        bbox = xz_legend.get_window_extent()
-        # Convert to axes coordinates
-        bbox_axes = ax_elev.transAxes.inverted().transform(bbox)
-        legend_y = bbox_axes.y0
-    else:
-        # bbox_to_anchor is a Bbox object
-        legend_y = bbox.y0
+    # The legend bbox_to_anchor is set to (0.0, -0.18) in axes coordinates
+    # We need to check the actual legend position by looking at its window extent
+    # and converting to axes coordinates
+    legend_window = xz_legend.get_window_extent()
+    bbox_axes = ax_elev.transAxes.inverted().transform(legend_window)
+    legend_y = bbox_axes[0][1]  # bottom-left y coordinate in axes units
     
     # Legend should be below the axes (y < 0 in axes coordinates)
     assert legend_y < 0, f"Legend y-coordinate {legend_y} should be < 0 (below axes)"
@@ -60,7 +56,7 @@ def test_xz_legend_below_axes():
     plt.close(fig)
 
 
-@pytest.mark.xfail(reason="Constrained layout may not be properly applied")
+# @pytest.mark.xfail(reason="Constrained layout may not be properly applied")  # FIXED
 def test_constrained_layout_applied():
     """Test that constrained layout is applied to the figure."""
     # Create geometry
