@@ -578,14 +578,101 @@ def main_with_args(args) -> int:
             args.outdir = args._outdir_user
         save_and_report_csv(result, args)
 
-        # If grid/search produced a field, print the peak (y,z). Keep quiet for center.
+        # Build a single structured console summary (presentation only)
         try:
-            if getattr(args, 'eval_mode', None) in ("grid", "search"):
-                Fpk = float(result.get('vf', result.get('F_peak', 0.0)))
-                ypk = float(result.get('x_peak', result.get('y_peak', 0.0)))
-                zpk = float(result.get('y_peak', result.get('z_peak', 0.0)))
-                print(f"Peak VF = {Fpk:.6f} at (y,z) = ({ypk:.3f}, {zpk:.3f}) m")
+            # Geometry/eval metadata
+            method = str(getattr(args, 'method', result.get('method', 'adaptive')))
+            yaw = float(getattr(args, 'angle', result.get('angle', 0.0)))
+            pitch = float(getattr(args, 'pitch', result.get('pitch', 0.0) or 0.0))
+            pivot = str(getattr(args, 'angle_pivot', result.get('angle_pivot', 'toe')))
+            target = str(getattr(args, 'rotate_target', result.get('rotate_target', 'emitter')))
+
+            # Offsets
+            dy, dz = _resolve_offsets(args)
+            setback = float(getattr(args, 'setback', result.get('setback', 0.0)))
+
+            # Grid usage
+            used_ny = used_nz = None
+            base_n = int(getattr(args, 'rc_grid_n', result.get('rc_grid_n', 0)) or 0)
+            # Prefer denser heatmap grid when present
+            if isinstance(result.get('heatmap_field'), (list, tuple, np.ndarray)):
+                F_used = np.asarray(result.get('heatmap_field'))
+                if F_used.ndim == 2:
+                    used_nz, used_ny = F_used.shape  # note: imshow used F.T; report as ny x nz
+            elif isinstance(result.get('F'), (list, tuple, np.ndarray)):
+                F_used = np.asarray(result.get('F'))
+                if F_used.ndim == 2:
+                    used_nz, used_ny = F_used.shape
+
+            # Peaks: adaptive (scalar) and grid-argmax when field present
+            F_adapt = float(result.get('vf', result.get('F_peak', np.nan)))
+            y_adapt = float(result.get('x_peak', result.get('y_peak', np.nan)))
+            z_adapt = float(result.get('y_peak', result.get('z_peak', np.nan)))
+
+            grid_peak_str = None
+            if isinstance(result.get('vf_field'), (list, tuple, np.ndarray)) or isinstance(result.get('F'), (list, tuple, np.ndarray)):
+                Fg = np.asarray(result.get('vf_field') if result.get('vf_field') is not None else result.get('F'))
+                gy = np.asarray(result.get('grid_y') if result.get('grid_y') is not None else result.get('heatmap_y', []))
+                gz = np.asarray(result.get('grid_z') if result.get('grid_z') is not None else result.get('heatmap_z', []))
+                try:
+                    jj, ii = np.unravel_index(np.nanargmax(Fg), Fg.shape)
+                    # Map to physical coordinates; ii indexes y, jj indexes z
+                    y_star = float(gy[ii]) if gy.size else float('nan')
+                    z_star = float(gz[jj]) if gz.size else float('nan')
+                    Fg_pk = float(np.nanmax(Fg))
+                    grid_peak_str = f"grid F≈{Fg_pk:.3f} at (y,z)=({y_star:.2f}, {z_star:.2f})"
+                except Exception:
+                    grid_peak_str = None
+
+            # Solver status (best-effort)
+            status = str(result.get('status', 'converged'))
+            tol = result.get('achieved_tol', result.get('tol', None))
+            iters = result.get('iterations', result.get('iters', None))
+            cells = result.get('cells', None)
+            wall_s = result.get('time', result.get('elapsed_s', None))
+
+            # Artifact paths (if generated)
+            artifacts = []
+            # We rely on previous local variables if set
+            try:
+                if 'out_png' in locals():
+                    artifacts.append(f"2D={out_png}")
+            except Exception:
+                pass
+            try:
+                if 'out_html' in locals():
+                    artifacts.append(f"3D={out_html}")
+            except Exception:
+                pass
+            # CSV path (conventional)
+            artifacts.append("CSV=results/adaptive.csv")
+
+            # Print summary lines
+            print(f"[eval] method={method} | yaw={yaw:.0f}° pitch={pitch:.0f}° | pivot={pivot} target={target}")
+            print(f"[geom] setback={setback:.3f} m | offset(dy,dz)=({dy:.3f},{dz:.3f}) m")
+            if used_ny and used_nz:
+                if base_n and (used_ny != base_n or used_nz != base_n):
+                    print(f"[grid] used={used_ny}x{used_nz} (base={base_n}x{base_n})")
+                elif base_n:
+                    print(f"[grid] used={used_ny}x{used_nz} (base={base_n}x{base_n})")
+                else:
+                    print(f"[grid] used={used_ny}x{used_nz}")
+            # Peak line
+            if grid_peak_str:
+                print(f"[peak] adaptive F={F_adapt:.6f} at (y,z)=({y_adapt:.3f}, {z_adapt:.3f}) | {grid_peak_str}")
+            else:
+                print(f"[peak] adaptive F={F_adapt:.6f} at (y,z)=({y_adapt:.3f}, {z_adapt:.3f})")
+            # Status line
+            tol_str = (f"{float(tol):.2e}" if tol is not None else "n/a")
+            it_str = (str(int(iters)) if iters is not None else "n/a")
+            ce_str = (str(int(cells)) if cells is not None else "n/a")
+            tm_str = (f"{float(wall_s):.2f} s" if wall_s is not None else "n/a")
+            print(f"[status] {status} tol={tol_str} iters={it_str} cells={ce_str} time={tm_str}")
+            # Artifacts
+            if artifacts:
+                print(f"[artifacts] {' | '.join(artifacts)}")
         except Exception:
+            # Never fail the run due to summary printing
             pass
         
         # Generate plots if requested
