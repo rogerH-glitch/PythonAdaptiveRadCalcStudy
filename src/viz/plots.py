@@ -1,3 +1,5 @@
+# PLOTTING PRINCIPLE: never massage visuals. Render computed geometry/fields as-is.
+
 from __future__ import annotations
 import numpy as np
 import matplotlib
