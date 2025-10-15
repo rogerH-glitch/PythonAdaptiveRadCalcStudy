@@ -173,15 +173,20 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_xz.set_xlabel("X (m)")
     ax_xz.set_ylabel("Z (m)")
     ax_xz.set_title("Elevation (X–Z)")
+    ax_xz.legend(loc="upper left", frameon=False)
     
-    # Set axis bounds to include both panels
-    b = _compute_bounds_from_panels(em_xy, rec_xy, em_xz, rec_xz, pad=0.02)
+    # Set axis bounds to include both panels with increased padding
+    b = _compute_bounds_from_panels(em_xy, rec_xy, em_xz, rec_xz, pad=0.05)
     (xlim_xy, ylim_xy) = b["xy"]
     (xlim_xz, zlim_xz) = b["xz"]
     ax_xy.set_xlim(*xlim_xy)
     ax_xy.set_ylim(*ylim_xy)
     ax_xz.set_xlim(*xlim_xz)
     ax_xz.set_ylim(*zlim_xz)
+    
+    # Add cosmetic margins for better visual presentation
+    ax_xy.margins(x=0.02, y=0.02)
+    ax_xz.margins(x=0.02, y=0.02)
 
     # If an explicit dense grid field is provided and preferred, use it first
     if prefer_eval_field and vf_field is not None and isinstance(vf_field, np.ndarray):
