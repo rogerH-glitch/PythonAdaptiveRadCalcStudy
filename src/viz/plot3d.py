@@ -34,44 +34,34 @@ def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False):
     args = MockArgs(result)
     display_geom = build_display_geom(args, result)
     
-    # Create wireframe traces using display geometry
+    # Create mesh traces using display geometry
     traces = []
 
-    def _maybe_to_xyz_lists(corners):
-        """
-        Accept np.ndarray shape (N,3) or list of (x,y,z) and return 3 lists (x,y,z).
-        Returns (None, None, None) if corners is falsy or empty.
-        """
-        if corners is None:
-            return None, None, None
-        arr = np.asarray(corners)
-        if arr.size == 0 or arr.ndim != 2 or arr.shape[1] != 3:
-            return None, None, None
-        x, y, z = arr[:, 0].tolist(), arr[:, 1].tolist(), arr[:, 2].tolist()
-        x.append(x[0]); y.append(y[0]); z.append(z[0])
-        return x, y, z
 
     # Get and order corners for proper rectangle rendering
     emitter_corners = display_geom.get("corners3d", {}).get("emitter")
     receiver_corners = display_geom.get("corners3d", {}).get("receiver")
     
+    def mesh_from_quad(q, name, color):
+        """Convert ordered quad corners to Mesh3d with two triangles."""
+        x, y, z = q[:, 0], q[:, 1], q[:, 2]
+        # faces: (0,1,2) and (0,2,3) - two triangles forming the quad
+        return go.Mesh3d(x=x, y=y, z=z, 
+                        i=[0, 0], j=[1, 2], k=[2, 3],
+                        color=color, opacity=0.9, name=name, 
+                        flatshading=True, showscale=False)
+    
     if emitter_corners is not None:
         # Convert list to numpy array and take first 4 points (remove duplicates)
         em_array = np.array(emitter_corners[:4])  # shape (4,3), values unmodified
         em = _order_quad(em_array)
-        xE, yE, zE = _maybe_to_xyz_lists(em)
-        if xE is not None:
-            traces.append(go.Scatter3d(x=xE, y=yE, z=zE, mode="lines",
-                                       line=dict(width=6, color="red"), name="Emitter"))
+        traces.append(mesh_from_quad(em, "Emitter", "red"))
 
     if receiver_corners is not None:
         # Convert list to numpy array and take first 4 points (remove duplicates)
         rc_array = np.array(receiver_corners[:4])  # shape (4,3)
         rc = _order_quad(rc_array)
-        xR, yR, zR = _maybe_to_xyz_lists(rc)
-        if xR is not None:
-            traces.append(go.Scatter3d(x=xR, y=yR, z=zR, mode="lines",
-                                       line=dict(width=6, color="black"), name="Receiver"))
+        traces.append(mesh_from_quad(rc, "Receiver", "black"))
     
     # Create figure with title
     fig = go.Figure(data=traces)
