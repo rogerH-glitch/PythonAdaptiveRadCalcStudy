@@ -335,6 +335,18 @@ Default assumptions:
         help='Grid resolution for coarse sampling (default: 21)'
     )
     peak_group.add_argument(
+        '--heatmap-n',
+        type=int,
+        default=None,
+        help='Heatmap grid resolution (default: use rc-grid-n)'
+    )
+    peak_group.add_argument(
+        '--heatmap-interp',
+        choices=['nearest', 'bilinear', 'bicubic'],
+        default='bilinear',
+        help='Heatmap interpolation method (default: bilinear)'
+    )
+    peak_group.add_argument(
         '--rc-search-rel-tol',
         type=float,
         default=3e-3,

@@ -228,6 +228,49 @@ def run_calculation(args) -> Dict[str, Any]:
                 result['grid_z'] = z_coords
                 # Ensure vf_field is available for compatibility
                 result['vf_field'] = Fg
+                
+                # Generate denser heatmap grid if requested
+                heatmap_n = getattr(args, 'heatmap_n', None)
+                if heatmap_n is not None and heatmap_n > ny:
+                    # Auto-downshift if budget too small
+                    max_points = 1600 if time_limit_s <= 1.5 else 3600
+                    if heatmap_n * heatmap_n > max_points:
+                        heatmap_n = int(_np.sqrt(max_points))
+                        print(f"[warn] reduced heatmap_n to {heatmap_n} due to time budget; values unchanged")
+                    
+                    if heatmap_n > ny:
+                        print(f"[heatmap] generating denser grid: {heatmap_n}x{heatmap_n}")
+                        # Use same fast evaluator for denser grid
+                        hm_y_coords = _np.linspace(-rc_w/2.0, rc_w/2.0, heatmap_n)
+                        hm_z_coords = _np.linspace(-rc_h/2.0, rc_h/2.0, heatmap_n)
+                        hm_Yg, hm_Zg = _np.meshgrid(hm_y_coords, hm_z_coords, indexing='xy')
+                        hm_Fg = _np.empty_like(hm_Yg, dtype=float)
+                        
+                        # Use same timeout and cooperative cancellation
+                        hm_token = _CancelToken(timeout_s=time_limit_s)
+                        hm_every_n = max(25, heatmap_n // 4)  # Check more frequently for larger grids
+                        
+                        try:
+                            for j in range(hm_Zg.shape[0]):
+                                if hm_token.expired():
+                                    print("[warn] heatmap grid timeout -> partial return")
+                                    hm_Fg[j:, :] = float("nan")
+                                    break
+                                for i in range(hm_Yg.shape[1]):
+                                    try:
+                                        vf_val, _meta = vf_evaluator(float(hm_Yg[0, i]), float(hm_Zg[j, 0]))
+                                    except Exception as _e:
+                                        vf_val = float('nan')
+                                    hm_Fg[j, i] = float(vf_val)
+                                    _check_time(start_ts, time_limit_s, hm_every_n, j*hm_Yg.shape[1] + i)
+                        except _Timeout as _e:
+                            hm_Fg[j:, i:] = float('nan')
+                            print(f"[warn] heatmap grid evaluation timed out: {_e}")
+                        
+                        # Store denser grid for heatmap
+                        result['heatmap_field'] = hm_Fg
+                        result['heatmap_y'] = hm_y_coords
+                        result['heatmap_z'] = hm_z_coords
             except Exception as _e:
                 logger.debug("dense grid generation failed: %s", _e)
     
@@ -420,6 +463,89 @@ def main_with_args(args) -> int:
             if has_field(result):
                 F = result["F"]
                 print(f"[plot] using dense grid field: shape={getattr(F, 'shape', None)}")
+                
+                # Generate denser heatmap grid if requested
+                heatmap_n = getattr(args, 'heatmap_n', None)
+                if heatmap_n is not None and hasattr(F, 'shape') and len(F.shape) == 2:
+                    current_n = F.shape[0]  # Assuming square grid
+                    if heatmap_n > current_n:
+                        # Auto-downshift if budget too small
+                        time_limit_s = float(getattr(args, 'rc_search_time_limit_s', 3.0) or 3.0)
+                        max_points = 1600 if time_limit_s <= 1.5 else 3600
+                        if heatmap_n * heatmap_n > max_points:
+                            import numpy as np
+                            heatmap_n = int(np.sqrt(max_points))
+                            print(f"[warn] reduced heatmap_n to {heatmap_n} due to time budget; values unchanged")
+                        
+                        if heatmap_n > current_n:
+                            print(f"[heatmap] generating denser grid: {heatmap_n}x{heatmap_n}")
+                            # Generate denser heatmap grid using the same fast evaluator
+                            try:
+                                from .peak_locator import create_vf_evaluator
+                                from .eval.cancel import CancelToken as _CancelToken
+                                from .eval.watchdog import check_time as _check_time, Timeout as _Timeout
+                                import numpy as _np
+                                import time as _time
+                                
+                                # Get geometry parameters
+                                em_w, em_h = args.emitter
+                                rc_w, rc_h = args.receiver
+                                setback = float(args.setback)
+                                angle = float(getattr(args, 'angle', 0.0))
+                                
+                                # Create fast evaluator (same as in run_calculation)
+                                method_params = _create_method_params(args)
+                                fast_params = (method_params or {}).copy()
+                                fast_params.update({
+                                    'max_cells': 1500,
+                                    'max_iters': 40,
+                                    'rel_tol': 1e-2,
+                                    'abs_tol': 1e-4,
+                                    'peak_search': False,
+                                    'multistart': 1,
+                                })
+                                
+                                # Get geometry config
+                                geom_cfg = result.get('geometry', {})
+                                vf_evaluator = create_vf_evaluator(
+                                    args.method, em_w, em_h, rc_w, rc_h, setback, angle, geom_cfg, **fast_params
+                                )
+                                
+                                # Generate denser grid
+                                hm_y_coords = _np.linspace(-rc_w/2.0, rc_w/2.0, heatmap_n)
+                                hm_z_coords = _np.linspace(-rc_h/2.0, rc_h/2.0, heatmap_n)
+                                hm_Yg, hm_Zg = _np.meshgrid(hm_y_coords, hm_z_coords, indexing='xy')
+                                hm_Fg = _np.empty_like(hm_Yg, dtype=float)
+                                
+                                # Use same timeout and cooperative cancellation
+                                hm_token = _CancelToken(timeout_s=time_limit_s)
+                                hm_every_n = max(25, heatmap_n // 4)
+                                start_ts = _time.time()
+                                
+                                try:
+                                    for j in range(hm_Zg.shape[0]):
+                                        if hm_token.expired():
+                                            print("[warn] heatmap grid timeout -> partial return")
+                                            hm_Fg[j:, :] = float("nan")
+                                            break
+                                        for i in range(hm_Yg.shape[1]):
+                                            try:
+                                                vf_val, _meta = vf_evaluator(float(hm_Yg[0, i]), float(hm_Zg[j, 0]))
+                                            except Exception as _e:
+                                                vf_val = float('nan')
+                                            hm_Fg[j, i] = float(vf_val)
+                                            _check_time(start_ts, time_limit_s, hm_every_n, j*hm_Yg.shape[1] + i)
+                                except _Timeout as _e:
+                                    hm_Fg[j:, i:] = float('nan')
+                                    print(f"[warn] heatmap grid evaluation timed out: {_e}")
+                                
+                                # Store denser grid for heatmap
+                                result['heatmap_field'] = hm_Fg
+                                result['heatmap_y'] = hm_y_coords
+                                result['heatmap_z'] = hm_z_coords
+                                print(f"[heatmap] generated denser grid: shape={hm_Fg.shape}")
+                            except Exception as _e:
+                                logger.debug("denser heatmap grid generation failed: %s", _e)
             else:
                 # Try to get field from tap as fallback
                 tapped = _drain_grid()
@@ -499,6 +625,15 @@ def main_with_args(args) -> int:
                 from .util.paths import get_outdir
                 raw = getattr(args, "_outdir_user", args.outdir)
                 out_png = join_with_ts(get_outdir(raw), "geom2d.png")
+                # Use denser heatmap grid if available, otherwise fall back to regular grid
+                heatmap_field = result.get("heatmap_field")
+                if heatmap_field is not None:
+                    vf_field = heatmap_field
+                    vf_grid = {"y": result.get("heatmap_y"), "z": result.get("heatmap_z")}
+                else:
+                    vf_field = result.get("F", None)
+                    vf_grid = {"y": result.get("grid_y"), "z": result.get("grid_z")}
+                
                 plot_geometry_and_heatmap(
                     result={**result, **{
                         "emitter_center": (float(args.setback), 0.0, 0.0),
@@ -514,11 +649,11 @@ def main_with_args(args) -> int:
                     method=args.method,
                     setback=float(args.setback),
                     out_png=out_png,
-                    # Prefer using attached/captured grid field when available
-                    vf_field=result.get("F", None),
-                    vf_grid={"y": result.get("grid_y"),
-                             "z": result.get("grid_z")},
+                    # Use denser heatmap grid if available
+                    vf_field=vf_field,
+                    vf_grid=vf_grid,
                     prefer_eval_field=True,
+                    heatmap_interp=getattr(args, "heatmap_interp", "bilinear"),
                 )
                 print(f"Combined geometry/heatmap saved to: {out_png}")
             except Exception as _e:

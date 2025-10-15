@@ -95,7 +95,7 @@ def _heatmap(ax, Y, Z, F, ypk, zpk, title="View Factor Heatmap"):
     ax.figure.colorbar(cs, ax=ax, label="View Factor")
 
 def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False,
-                              vf_field=None, vf_grid=None, prefer_eval_field: bool=False):
+                              vf_field=None, vf_grid=None, prefer_eval_field: bool=False, heatmap_interp: str="bilinear"):
     """
     Draw Plan (X–Y), Elevation (X–Z) wireframes (Emitter red, Receiver black) and the Y–Z heatmap.
     Uses centralized display geometry for consistent rotation/translation.
@@ -226,13 +226,13 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     extent = [y_min, y_max, z_min, z_max]
     
     try:
-        # Use imshow with proper extent for physical coordinates
-        hm = ax_hm.imshow(F.T, origin="lower", extent=extent, aspect="auto", cmap="inferno")
+        # Use imshow with proper extent for physical coordinates and interpolation
+        hm = ax_hm.imshow(F.T, origin="lower", extent=extent, aspect="auto", cmap="inferno", interpolation=heatmap_interp)
     except Exception as e:
         # Fallback: draw a blank heatmap grid to avoid crashing the CLI
         # and surface a friendly message in the figure title.
         from matplotlib.colors import Normalize
-        hm = ax_hm.imshow(np.zeros_like(F.T), origin="lower", extent=extent, aspect="auto", cmap="inferno", norm=Normalize(0, 1))
+        hm = ax_hm.imshow(np.zeros_like(F.T), origin="lower", extent=extent, aspect="auto", cmap="inferno", norm=Normalize(0, 1), interpolation=heatmap_interp)
         heatmap_title = f"Heatmap (fallback; data unavailable: {type(e).__name__})"
     # peak marker + label (existing behavior uses argmax on F)
     ax_hm.plot([ypk], [zpk], marker="*", ms=12, mfc="white", mec="red")
