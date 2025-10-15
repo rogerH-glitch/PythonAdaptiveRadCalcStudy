@@ -347,6 +347,11 @@ Default assumptions:
         help='Heatmap interpolation method (default: bilinear)'
     )
     peak_group.add_argument(
+        '--debug-plots',
+        action='store_true',
+        help='Enable verbose plot debug logs (markers and 3D vertices). Off by default.'
+    )
+    peak_group.add_argument(
         '--heatmap-marker',
         choices=['adaptive', 'grid', 'both'],
         default='both',

@@ -17,7 +17,7 @@ def _title_from_result(result: dict) -> str:
     return "Emitter / Receiver – 3D" + off + rot
 
 
-def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False):
+def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False, debug_plots: bool=False):
     import plotly.graph_objects as go
     
     # Create a mock args object for build_display_geom
@@ -41,18 +41,17 @@ def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False):
     # Get and order corners for proper rectangle rendering
     emitter_corners = display_geom.get("corners3d", {}).get("emitter")
     receiver_corners = display_geom.get("corners3d", {}).get("receiver")
-    # --- P0 DEBUG START ---
-    try:
-        import numpy as _np
-        _em = _np.asarray(display_geom.get("corners3d", {}).get("emitter"), float)
-        _rc = _np.asarray(display_geom.get("corners3d", {}).get("receiver"), float)
-        if _em.size:
-            print("[p0-3d] emitter_corners=", _em.round(6).tolist())
-        if _rc.size:
-            print("[p0-3d] receiver_corners=", _rc.round(6).tolist())
-    except Exception:
-        pass
-    # --- P0 DEBUG END ---
+    if debug_plots:
+        try:
+            import numpy as _np
+            _em = _np.asarray(display_geom.get("corners3d", {}).get("emitter"), float)
+            _rc = _np.asarray(display_geom.get("corners3d", {}).get("receiver"), float)
+            if _em.size:
+                print("[p0-3d] emitter_corners=", _em.round(6).tolist())
+            if _rc.size:
+                print("[p0-3d] receiver_corners=", _rc.round(6).tolist())
+        except Exception:
+            pass
     
     def mesh_from_quad(q, name, color):
         """Convert ordered quad corners to Mesh3d with two triangles."""
@@ -67,12 +66,20 @@ def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False):
         # Convert list to numpy array and take first 4 points (remove duplicates)
         em_array = np.array(emitter_corners[:4])  # shape (4,3), values unmodified
         em = _order_quad(em_array)
+        try:
+            print("[f3-3d] emitter_ordered=", np.asarray(em).round(6).tolist())
+        except Exception:
+            pass
         traces.append(mesh_from_quad(em, "Emitter", "red"))
 
     if receiver_corners is not None:
         # Convert list to numpy array and take first 4 points (remove duplicates)
         rc_array = np.array(receiver_corners[:4])  # shape (4,3)
         rc = _order_quad(rc_array)
+        try:
+            print("[f3-3d] receiver_ordered=", np.asarray(rc).round(6).tolist())
+        except Exception:
+            pass
         traces.append(mesh_from_quad(rc, "Receiver", "black"))
     
     # Create figure with title

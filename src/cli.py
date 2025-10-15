@@ -742,6 +742,12 @@ def main_with_args(args) -> int:
                     prefer_eval_field=True,
                     heatmap_interp=getattr(args, "heatmap_interp", "bilinear"),
                     marker_mode=getattr(args, "heatmap_marker", "both"),
+                    adaptive_peak_yz=(
+                        float(result.get('x_peak', result.get('y_peak', 0.0))),
+                        float(result.get('y_peak', result.get('z_peak', 0.0)))
+                    ),
+                    subcell_fit=True,
+                    debug_plots=bool(getattr(args, 'debug_plots', False)),
                 )
                 print(f"Combined geometry/heatmap saved to: {out_png}")
             except Exception as _e:
@@ -756,7 +762,7 @@ def main_with_args(args) -> int:
                 from .util.paths import get_outdir
                 raw = getattr(args, "_outdir_user", args.outdir)
                 out_html = str(join_with_ts(get_outdir(raw), "geom3d.html"))
-                plot_geometry_3d(result, out_html)
+                plot_geometry_3d(result, out_html, debug_plots=bool(getattr(args, 'debug_plots', False)))
                 print(f"3-D interactive plot saved to: {out_html}")
             except Exception as _e:
                 logger.warning(f"3D plot skipped: {_e}")

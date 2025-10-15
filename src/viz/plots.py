@@ -147,7 +147,8 @@ def _heatmap(ax, Y, Z, F, ypk, zpk, title="View Factor Heatmap"):
 
 def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False,
                               vf_field=None, vf_grid=None, prefer_eval_field: bool=False, heatmap_interp: str="bilinear",
-                              marker_mode: str="both", adaptive_peak_yz=None, subcell_fit: bool=True, title: str | None=None):
+                              marker_mode: str="both", adaptive_peak_yz=None, subcell_fit: bool=True, title: str | None=None,
+                              debug_plots: bool=False):
     """
     Draw Plan (X–Y), Elevation (X–Z) wireframes (Emitter red, Receiver black) and the Y–Z heatmap.
     Uses centralized display geometry for consistent rotation/translation.
@@ -315,7 +316,7 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     # Markers and diagnostics
     # --- P0 DEBUG START ---
     try:
-        if vf_field is not None and vf_grid is not None and isinstance(vf_grid, dict):
+        if debug_plots and vf_field is not None and vf_grid is not None and isinstance(vf_grid, dict):
             import numpy as _np
             gy_dbg, gz_dbg = vf_grid.get("y"), vf_grid.get("z")
             try:
