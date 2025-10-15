@@ -14,14 +14,23 @@ def bbox_size_2d(points_xy: np.ndarray | Iterable[Tuple[float, float]]) -> Tuple
 
 
 def order_quad(corners3d: np.ndarray) -> np.ndarray:
-    pts = corners3d[:, :2]
-    c = pts.mean(axis=0)
-    ang = np.arctan2(pts[:, 1] - c[1], pts[:, 0] - c[0])
-    order = np.argsort(ang)
+    """
+    Order quad corners to form a proper perimeter (no bow-tie).
+    For rectangles, orders corners by Y then Z to ensure proper perimeter.
+    """
+    # For rectangles, we can use Y-Z ordering to ensure proper perimeter
+    # Sort by Y (ascending), then by Z (ascending)
+    order = np.lexsort((corners3d[:, 2], corners3d[:, 1]))
+    
+    # This gives us: bottom-left, bottom-right, top-left, top-right
+    # We want: bottom-left, bottom-right, top-right, top-left
+    # So we need to swap the last two
     ordered = corners3d[order]
-    pts_ord = ordered[:, :2]
-    start = np.lexsort((pts_ord[:, 0], pts_ord[:, 1]))[0]
-    return np.roll(ordered, -start, axis=0)
+    if len(ordered) == 4:
+        # Swap positions 2 and 3 to get proper perimeter order
+        ordered = np.vstack([ordered[:2], ordered[3:4], ordered[2:3]])
+    
+    return ordered
 
 
 def span_with_epsilon(vmin: float, vmax: float, *, ref: float = 1.0, eps: float = 1e-9) -> tuple[float, float]:

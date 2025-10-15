@@ -743,8 +743,8 @@ def main_with_args(args) -> int:
                     heatmap_interp=getattr(args, "heatmap_interp", "bilinear"),
                     marker_mode=getattr(args, "heatmap_marker", "both"),
                     adaptive_peak_yz=(
-                        float(result.get('x_peak', result.get('y_peak', 0.0))),
-                        float(result.get('y_peak', result.get('z_peak', 0.0)))
+                        float(result.get('x_peak', 0.0)),
+                        float(result.get('y_peak', 0.0))
                     ),
                     subcell_fit=True,
                     debug_plots=bool(getattr(args, 'debug_plots', False)),

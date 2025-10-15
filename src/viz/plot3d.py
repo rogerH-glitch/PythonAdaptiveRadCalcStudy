@@ -57,6 +57,28 @@ def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False, deb
         """Convert ordered quad corners to Mesh3d with two triangles."""
         x, y, z = q[:, 0], q[:, 1], q[:, 2]
         # faces: (0,1,2) and (0,2,3) - two triangles forming the quad
+        
+        # Debug instrumentation for 3D quad planarity
+        if debug_plots:
+            # Check planarity using SVD
+            centroid = np.mean(q, axis=0)
+            centered = q - centroid
+            U, S, Vt = np.linalg.svd(centered)
+            normal = Vt[-1]  # Last row of Vt (smallest singular value)
+            distances = np.abs(np.dot(centered, normal))
+            max_distance = np.max(distances)
+            is_planar = max_distance < 1e-6
+            
+            print(f"[debug-3d] {name} quad planarity check:")
+            print(f"[debug-3d]   corners: {q.round(6).tolist()}")
+            print(f"[debug-3d]   plane normal: {normal.round(6)}")
+            print(f"[debug-3d]   max distance from plane: {max_distance:.2e}")
+            print(f"[debug-3d]   is planar: {is_planar}")
+            print(f"[debug-3d]   triangle indices: (0,1,2) and (0,2,3)")
+            
+            if not is_planar:
+                print(f"[debug-3d]   WARNING: {name} quad is not planar (expected for rectangles)")
+        
         return go.Mesh3d(x=x, y=y, z=z, 
                         i=[0, 0], j=[1, 2], k=[2, 3],
                         color=color, opacity=0.9, name=name, 

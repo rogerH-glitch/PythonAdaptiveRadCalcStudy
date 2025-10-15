@@ -355,6 +355,17 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     try:
         # Use imshow with proper extent for physical coordinates and interpolation
         hm = ax_hm.imshow(F.T, origin="lower", extent=extent, aspect="equal", cmap="inferno", interpolation=heatmap_interp)
+        
+        # Debug instrumentation for heatmap marker mapping
+        if debug_plots:
+            print(f"[debug-heatmap] imshow extent={extent} origin=lower")
+            print(f"[debug-heatmap] field shape (ny,nz)={F.shape}")
+            print(f"[debug-heatmap] data->axes mapping: y=({extent[0]}, {extent[1]}) z=({extent[2]}, {extent[3]})")
+            if adaptive_peak_yz is not None:
+                print(f"[debug-heatmap] adaptive peak (y,z)={adaptive_peak_yz}")
+                # Show the transform used for marker placement
+                y_data, z_data = adaptive_peak_yz
+                print(f"[debug-heatmap] marker will be placed at data coords (y,z)=({y_data:.6f}, {z_data:.6f})")
     except Exception as e:
         # Fallback: draw a blank heatmap grid to avoid crashing the CLI
         # and surface a friendly message in the figure title.
@@ -374,9 +385,9 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
             except Exception as _e:
                 jj_dbg = ii_dbg = None
                 _y_grid_dbg = _z_grid_dbg = None
-            adaptive_peak_yz = (float(ypk), float(zpk)) if _np.isfinite(ypk) and _np.isfinite(zpk) else None
+            adaptive_peak_yz_dbg = (float(ypk), float(zpk)) if _np.isfinite(ypk) and _np.isfinite(zpk) else None
             print(f"[p0] marker_mode={marker_mode} | grid_idx={(jj_dbg, ii_dbg)} grid_yz=({_y_grid_dbg},{_z_grid_dbg}) | "
-                  f"adaptive_yz={adaptive_peak_yz} | field_shape={None if vf_field is None else _np.asarray(vf_field).shape}")
+                  f"adaptive_yz={adaptive_peak_yz_dbg} | field_shape={None if vf_field is None else _np.asarray(vf_field).shape}")
     except Exception:
         pass
     # --- P0 DEBUG END ---
@@ -399,6 +410,8 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
                        color="crimson", markeredgecolor="white", linestyle="None", zorder=10)
             y_grid, z_grid = y_star, z_star
         if show_adapt:
+            # Ensure adaptive marker is placed in the same coordinate system as the heatmap
+            # The heatmap uses imshow with extent, so we need to use the same coordinate system
             ax_hm.plot([ypk], [zpk], marker="x", markersize=6, markeredgewidth=1.0,
                        color="white", markeredgecolor="black", linestyle="None", zorder=11)
         # Diagnostics: grid spacing and distance from adaptive peak to nearest node
