@@ -272,6 +272,26 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     except Exception:
         pass
 
+    # --- G3: 5% padding on XY & XZ axes (true scale preserved) ---
+    try:
+        import numpy as _np
+        def _pad_limits(_ax, frac: float = 0.05):
+            """Pad x/y limits symmetrically by a fraction of current span."""
+            x0, x1 = _ax.get_xlim()
+            if _np.isfinite([x0, x1]).all() and (x1 > x0):
+                sx = x1 - x0
+                px = sx * float(frac)
+                _ax.set_xlim(x0 - px, x1 + px)
+            y0, y1 = _ax.get_ylim()
+            if _np.isfinite([y0, y1]).all() and (y1 > y0):
+                sy = y1 - y0
+                py = sy * float(frac)
+                _ax.set_ylim(y0 - py, y1 + py)
+        _pad_limits(ax_xy, frac=0.05)
+        _pad_limits(ax_xz, frac=0.05)
+    except Exception:
+        pass
+
     # --- G2: legends below x-axis, outside the plots ---
     try:
         fig.set_constrained_layout(True)
