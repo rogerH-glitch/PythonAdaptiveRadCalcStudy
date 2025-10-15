@@ -194,6 +194,10 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_xz.set_xlim(*xlim_xz)
     ax_xz.set_ylim(*zlim_xz)
     
+    # Set true-scale aspect ratios (equal scale, square panels)
+    ax_xy.set_aspect("equal", adjustable="box")
+    ax_xz.set_aspect("equal", adjustable="box")
+    
     # Add cosmetic margins for better visual presentation
     ax_xy.margins(x=0.02, y=0.02)
     ax_xz.margins(x=0.02, y=0.02)
@@ -237,12 +241,12 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     
     try:
         # Use imshow with proper extent for physical coordinates and interpolation
-        hm = ax_hm.imshow(F.T, origin="lower", extent=extent, aspect="auto", cmap="inferno", interpolation=heatmap_interp)
+        hm = ax_hm.imshow(F.T, origin="lower", extent=extent, aspect="equal", cmap="inferno", interpolation=heatmap_interp)
     except Exception as e:
         # Fallback: draw a blank heatmap grid to avoid crashing the CLI
         # and surface a friendly message in the figure title.
         from matplotlib.colors import Normalize
-        hm = ax_hm.imshow(np.zeros_like(F.T), origin="lower", extent=extent, aspect="auto", cmap="inferno", norm=Normalize(0, 1), interpolation=heatmap_interp)
+        hm = ax_hm.imshow(np.zeros_like(F.T), origin="lower", extent=extent, aspect="equal", cmap="inferno", norm=Normalize(0, 1), interpolation=heatmap_interp)
         heatmap_title = f"Heatmap (fallback; data unavailable: {type(e).__name__})"
     # peak marker + label (existing behavior uses argmax on F)
     ax_hm.plot([ypk], [zpk], marker="*", ms=12, mfc="white", mec="red")
