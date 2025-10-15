@@ -147,7 +147,7 @@ def _heatmap(ax, Y, Z, F, ypk, zpk, title="View Factor Heatmap"):
 
 def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False,
                               vf_field=None, vf_grid=None, prefer_eval_field: bool=False, heatmap_interp: str="bilinear",
-                              marker_mode: str="both"):
+                              marker_mode: str="both", adaptive_peak_yz=None, subcell_fit: bool=True, title: str | None=None):
     """
     Draw Plan (X–Y), Elevation (X–Z) wireframes (Emitter red, Receiver black) and the Y–Z heatmap.
     Uses centralized display geometry for consistent rotation/translation.
@@ -166,9 +166,13 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     args = MockArgs(result)
     display_geom = build_display_geom(args, result)
     
-    # Extract field data safely - will be updated if dense field is available
-    ypk = float(result.get("x_peak", 0.0))
-    zpk = float(result.get("y_peak", 0.0))
+    # Extract field data safely - allow explicit adaptive peak override
+    if adaptive_peak_yz is not None and isinstance(adaptive_peak_yz, (tuple, list)) and len(adaptive_peak_yz) == 2:
+        ypk = float(adaptive_peak_yz[0])
+        zpk = float(adaptive_peak_yz[1])
+    else:
+        ypk = float(result.get("x_peak", 0.0))
+        zpk = float(result.get("y_peak", 0.0))
     Fpk = float(result.get("vf", np.nan))
 
     fig = plt.figure(figsize=(14, 4.5))
@@ -337,11 +341,16 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
             gy = np.asarray(grid_y, float)
             gz = np.asarray(grid_z, float)
             jj, ii = np.unravel_index(np.nanargmax(F), F.shape)
-            # Sub-cell quadratic refinement for marker only
-            y_star, z_star = subcell_quadratic_peak(F, gy, gz, jj, ii)
-            ax_hm.plot([y_star], [z_star], marker="*", ms=6, mfc="none", mec="red", mew=0.8)
+            # Map grid node, then optional sub-cell quadratic refinement for marker only
+            if subcell_fit:
+                y_star, z_star = subcell_quadratic_peak(F, gy, gz, jj, ii)
+            else:
+                y_star, z_star = float(gy[ii]), float(gz[jj])
+            ax_hm.plot([y_star], [z_star], marker=(5, 1, 0), markersize=6, markeredgewidth=0.8,
+                       color="crimson", markeredgecolor="white", linestyle="None", zorder=10)
         if show_adapt:
-            ax_hm.plot([ypk], [zpk], marker="x", ms=6, mfc="white", mec="black", mew=0.8)
+            ax_hm.plot([ypk], [zpk], marker="x", markersize=6, markeredgewidth=1.0,
+                       color="white", markeredgecolor="black", linestyle="None", zorder=11)
         # Diagnostics: grid spacing and distance from adaptive peak to nearest node
         if grid_y is not None and grid_z is not None:
             gy = np.asarray(grid_y, float)
@@ -349,10 +358,9 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
             if gy.size >= 2 and gz.size >= 2 and np.isfinite(ypk) and np.isfinite(zpk):
                 dy = float((gy[-1] - gy[0]) / (gy.size - 1))
                 dz = float((gz[-1] - gz[0]) / (gz.size - 1))
-                iy = int(np.clip(np.round((ypk - gy[0]) / dy), 0, gy.size - 1))
-                jz = int(np.clip(np.round((zpk - gz[0]) / dz), 0, gz.size - 1))
-                y_near = float(gy[iy]); z_near = float(gz[jz])
-                d = float(np.hypot(y_near - ypk, z_near - zpk))
+                jn = int(np.argmin(np.abs(gy - ypk)))
+                in_ = int(np.argmin(np.abs(gz - zpk)))
+                d = float(np.hypot(ypk - gy[jn], zpk - gz[in_]))
                 print(f"[diag] grid Δy≈{dy:.3f} Δz≈{dz:.3f} | dist_to_nearest_node≈{d:.3f} m")
     except Exception:
         pass
@@ -386,7 +394,7 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     piv = str(result.get("angle_pivot", "toe"))
     tgt = str(result.get("rotate_target", "emitter"))
     yaw_text = f" | Yaw {yaw:.0f}° (pivot={piv}, target={tgt})" if abs(yaw) > 1e-9 else ""
-    sup = (
+    sup = title if title is not None else (
         f"{method.title()} — Peak VF: {Fpk:.6f} at (y,z)=({ypk:.3f},{zpk:.3f}) m | Eval Mode: {eval_mode} | Setback: {setback:.3f} m{yaw_text}{offset_text}"
         if np.isfinite(Fpk)
         else f"{method.title()} | Eval Mode: {eval_mode} | Setback: {setback:.3f} m{yaw_text}{offset_text}"
