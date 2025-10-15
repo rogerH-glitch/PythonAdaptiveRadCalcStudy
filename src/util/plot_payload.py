@@ -7,7 +7,12 @@ def attach_grid_field(result: Dict[str, Any], Y, Z, F) -> None:
     """Attach arrays for plotting to the result in a consistent schema."""
     if Y is None or Z is None or F is None:
         return
+    if not isinstance(result, dict):
+        return
     gd = result.setdefault("grid_data", {})
+    if gd is None:
+        result["grid_data"] = {}
+        gd = result["grid_data"]
     gd.update({"Y": Y, "Z": Z, "F": F})
     result["Y"] = Y
     result["Z"] = Z

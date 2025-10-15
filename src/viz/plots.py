@@ -81,7 +81,8 @@ def _heatmap(ax, Y, Z, F, ypk, zpk, title="View Factor Heatmap"):
     ax.set_ylabel("Z (m)")
     ax.figure.colorbar(cs, ax=ax, label="View Factor")
 
-def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False):
+def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False,
+                              vf_field=None, vf_grid=None, prefer_eval_field: bool=False):
     """
     Draw Plan (X–Y), Elevation (X–Z) wireframes (Emitter red, Receiver black) and the Y–Z heatmap.
     Uses centralized display geometry for consistent rotation/translation.
@@ -152,11 +153,21 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_xz.set_ylabel("Z (m)")
     ax_xz.set_title("Elevation (X–Z)")
 
-    # Field capture (tap preferred)
+    # Field capture (tap preferred) or explicitly provided eval field
     field = getattr(result, "field", None)
     Y = getattr(field, "Y", None) if field is not None else None
     Z = getattr(field, "Z", None) if field is not None else None
     F = getattr(field, "F", None) if field is not None else None
+
+    # If an explicit dense grid field is provided and preferred, use it
+    if prefer_eval_field and vf_field is not None and isinstance(vf_field, np.ndarray):
+        F = vf_field
+        if isinstance(vf_grid, dict):
+            gy = vf_grid.get("y", None)
+            gz = vf_grid.get("z", None)
+            if gy is not None and gz is not None:
+                # Build meshgrid matching F orientation (nz, ny)
+                Y, Z = np.meshgrid(np.asarray(gy, float), np.asarray(gz, float), indexing="xy")
 
     # If field missing, always ensure we have something to render.
     if Y is None or Z is None or F is None:
@@ -171,7 +182,7 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
         except Exception:
             Y, Z, F = _build_placeholder_field(rW, rH)
 
-    # Heatmap rendering
+    # Heatmap rendering (no extra normalisation; vf_field is already 0..1 view factor)
     heatmap_title = "View Factor Heatmap"
     try:
         hm = ax_hm.pcolormesh(Y, Z, F, shading="auto", cmap="inferno")
@@ -187,6 +198,15 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_hm.set_xlabel("Y (m)")
     ax_hm.set_ylabel("Z (m)")
     fig.colorbar(hm, ax=ax_hm, label="View Factor")
+
+    # Plausibility check for accidental re-normalisation
+    try:
+        if F is not None:
+            vmax = float(np.nanmax(F))
+            if vmax < 1e-6:
+                print("[warn] heatmap vf_field peak is extremely small; check normalisation")
+    except Exception:
+        pass
 
     # Title with offset information
     # Calculate offset from receiver_center if not explicitly provided

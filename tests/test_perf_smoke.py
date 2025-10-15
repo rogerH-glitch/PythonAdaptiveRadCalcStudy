@@ -25,3 +25,4 @@ def test_build_display_geom_is_reasonably_fast():
     dt = time.perf_counter() - t0
     assert dt < 5.0, f"display geom took {dt:.2f}s for 400 builds (should be < 5s)"
 
+
