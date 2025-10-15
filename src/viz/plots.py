@@ -125,7 +125,7 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     args = MockArgs(result)
     display_geom = build_display_geom(args, result)
     
-    # Extract field data safely
+    # Extract field data safely - will be updated if dense field is available
     ypk = float(result.get("x_peak", 0.0))
     zpk = float(result.get("y_peak", 0.0))
     Fpk = float(result.get("vf", np.nan))
@@ -211,6 +211,10 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
             if gy is not None and gz is not None:
                 # Build meshgrid matching F orientation (nz, ny)
                 Y, Z = np.meshgrid(np.asarray(gy, float), np.asarray(gz, float), indexing="xy")
+                # Compute peak from the dense field
+                j, i = np.unravel_index(np.nanargmax(F), F.shape)
+                ypk = float(gy[i])  # gy is 1D array, i is the column index
+                zpk = float(gz[j])  # gz is 1D array, j is the row index
     else:
         # Field capture (tap preferred) or fallback to result field
         field = getattr(result, "field", None)
