@@ -9,6 +9,15 @@ from matplotlib.patches import Rectangle
 from .display_geom import build_display_geom
 from ..util.plot_payload import has_field
 
+def _xz_silhouette(corners):
+    """Orthographic projection onto XZ, silhouette as axis-aligned bbox."""
+    x = corners[:, 0]
+    z = corners[:, 2]
+    x0, x1 = float(np.min(x)), float(np.max(x))
+    z0, z1 = float(np.min(z)), float(np.max(z))
+    # rectangle in order
+    return np.array([[x0, z0], [x0, z1], [x1, z1], [x1, z0], [x0, z0]], dtype=float)
+
 def _compute_bounds_from_panels(p_em_xy, p_rec_xy, p_em_xz, p_rec_xz, pad=0.02):
     """Compute axis bounds to include both emitter and receiver panels with padding."""
     def _bounds(a, b):
@@ -149,27 +158,26 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_xy.set_title("Plan (X–Y)")
     ax_xy.legend(loc="upper left", bbox_to_anchor=(0.02, 0.98))
 
-    # Elevation view (X-Z) - use thin rectangles
-    emitter_xz = display_geom["xz"]["emitter"]
-    receiver_xz = display_geom["xz"]["receiver"]
+    # Elevation view (X-Z) - use orthographic silhouette rectangles
+    emitter_corners = np.array(display_geom["corners3d"]["emitter"])
+    receiver_corners = np.array(display_geom["corners3d"]["receiver"])
+    
+    # Compute orthographic silhouettes
+    em_xz_outline = _xz_silhouette(emitter_corners)
+    rc_xz_outline = _xz_silhouette(receiver_corners)
     
     # Convert to numpy arrays for bounds computation
-    em_xz = np.array([[emitter_xz["x"], emitter_xz["z0"]], [emitter_xz["x"], emitter_xz["z1"]]]) if emitter_xz else np.array([[0, 0], [0, 0]])
-    rec_xz = np.array([[receiver_xz["x"], receiver_xz["z0"]], [receiver_xz["x"], receiver_xz["z1"]]]) if receiver_xz else np.array([[0, 0], [0, 0]])
+    em_xz = em_xz_outline
+    rec_xz = rc_xz_outline
     
-    if emitter_xz:
-        rect = Rectangle((emitter_xz["x"] - 0.01, emitter_xz["z0"]), 0.02, 
-                        emitter_xz["z1"] - emitter_xz["z0"], 
-                        facecolor="red", edgecolor="red", linewidth=1.0, alpha=0.7,
-                        label=f"Emitter {result.get('We', 5.0):.3g}×{result.get('He', 2.0):.3g} m")
-        ax_xz.add_patch(rect)
+    # Plot silhouettes as polylines
+    ax_xz.plot(em_xz_outline[:, 0], em_xz_outline[:, 1], 
+               color="red", linewidth=2.0, alpha=0.8,
+               label=f"Emitter {result.get('We', 5.0):.3g}×{result.get('He', 2.0):.3g} m")
     
-    if receiver_xz:
-        rect = Rectangle((receiver_xz["x"] - 0.01, receiver_xz["z0"]), 0.02,
-                        receiver_xz["z1"] - receiver_xz["z0"],
-                        facecolor="black", edgecolor="black", linewidth=1.0, alpha=0.7,
-                        label=f"Receiver {result.get('Wr', 5.0):.3g}×{result.get('Hr', 2.0):.3g} m")
-        ax_xz.add_patch(rect)
+    ax_xz.plot(rc_xz_outline[:, 0], rc_xz_outline[:, 1], 
+               color="black", linewidth=2.0, alpha=0.8,
+               label=f"Receiver {result.get('Wr', 5.0):.3g}×{result.get('Hr', 2.0):.3g} m")
     
     ax_xz.set_aspect("equal")
     ax_xz.set_xlabel("X (m)")
