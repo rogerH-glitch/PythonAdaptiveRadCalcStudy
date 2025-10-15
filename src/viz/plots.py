@@ -147,7 +147,7 @@ def _heatmap(ax, Y, Z, F, ypk, zpk, title="View Factor Heatmap"):
 
 def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False,
                               vf_field=None, vf_grid=None, prefer_eval_field: bool=False, heatmap_interp: str="bilinear",
-                              marker_mode: str="both", adaptive_peak_yz=None, subcell_fit: bool=True, title: str | None=None,
+                              marker_mode: str="adaptive", adaptive_peak_yz=None, subcell_fit: bool=True, title: str | None=None,
                               debug_plots: bool=False):
     """
     Draw Plan (X–Y), Elevation (X–Z) wireframes (Emitter red, Receiver black) and the Y–Z heatmap.
@@ -349,6 +349,7 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
                 y_star, z_star = float(gy[ii]), float(gz[jj])
             ax_hm.plot([y_star], [z_star], marker=(5, 1, 0), markersize=6, markeredgewidth=0.8,
                        color="crimson", markeredgecolor="white", linestyle="None", zorder=10)
+            y_grid, z_grid = y_star, z_star
         if show_adapt:
             ax_hm.plot([ypk], [zpk], marker="x", markersize=6, markeredgewidth=1.0,
                        color="white", markeredgecolor="black", linestyle="None", zorder=11)
@@ -363,6 +364,24 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
                 in_ = int(np.argmin(np.abs(gz - zpk)))
                 d = float(np.hypot(ypk - gy[jn], zpk - gz[in_]))
                 print(f"[diag] grid Δy≈{dy:.3f} Δz≈{dz:.3f} | dist_to_nearest_node≈{d:.3f} m")
+        # Attach meta for tests
+        placed_grid = None
+        if show_grid:
+            try:
+                if (y_grid is not None) and np.isfinite(y_grid) and np.isfinite(z_grid):
+                    placed_grid = (float(y_grid), float(z_grid))
+            except Exception:
+                placed_grid = None
+        placed_adaptive = None
+        if show_adapt and np.isfinite(ypk) and np.isfinite(zpk):
+            placed_adaptive = (float(ypk), float(zpk))
+        try:
+            fig._vf_plot_meta = {
+                "markers": {"grid": placed_grid, "adaptive": placed_adaptive},
+                "field_shape": None if vf_field is None else tuple(np.asarray(vf_field).shape),
+            }
+        except Exception:
+            pass
     except Exception:
         pass
     ax_hm.set_title(heatmap_title)

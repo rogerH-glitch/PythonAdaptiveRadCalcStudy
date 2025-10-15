@@ -354,7 +354,7 @@ Default assumptions:
     peak_group.add_argument(
         '--heatmap-marker',
         choices=['adaptive', 'grid', 'both'],
-        default='both',
+        default='adaptive',
         help='Heatmap marker mode: adaptive peak, grid argmax, or both'
     )
     peak_group.add_argument(
