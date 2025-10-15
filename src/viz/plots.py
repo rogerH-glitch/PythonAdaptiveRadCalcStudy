@@ -222,11 +222,11 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     # Plot silhouettes as polylines
     ax_xz.plot(em_xz_outline[:, 0], em_xz_outline[:, 1], 
                color="red", linewidth=2.0, alpha=0.8,
-               label=f"Emitter {result.get('We', 5.0):.3g}×{result.get('He', 2.0):.3g} m")
+                        label=f"Emitter {result.get('We', 5.0):.3g}×{result.get('He', 2.0):.3g} m")
     
     ax_xz.plot(rc_xz_outline[:, 0], rc_xz_outline[:, 1], 
                color="black", linewidth=2.0, alpha=0.8,
-               label=f"Receiver {result.get('Wr', 5.0):.3g}×{result.get('Hr', 2.0):.3g} m")
+                        label=f"Receiver {result.get('Wr', 5.0):.3g}×{result.get('Hr', 2.0):.3g} m")
     
     ax_xz.set_aspect("equal")
     ax_xz.set_xlabel("X (m)")
@@ -394,12 +394,17 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     piv = str(result.get("angle_pivot", "toe"))
     tgt = str(result.get("rotate_target", "emitter"))
     yaw_text = f" | Yaw {yaw:.0f}° (pivot={piv}, target={tgt})" if abs(yaw) > 1e-9 else ""
-    sup = title if title is not None else (
-        f"{method.title()} — Peak VF: {Fpk:.6f} at (y,z)=({ypk:.3f},{zpk:.3f}) m | Eval Mode: {eval_mode} | Setback: {setback:.3f} m{yaw_text}{offset_text}"
-        if np.isfinite(Fpk)
-        else f"{method.title()} | Eval Mode: {eval_mode} | Setback: {setback:.3f} m{yaw_text}{offset_text}"
-    )
-    fig.suptitle(sup)
+    if title is not None:
+        fig.suptitle(title)
+    else:
+        # Build a clean two-line title: line1 (peak/eval/setback), line2 (yaw/pivot/target/offset)
+        line1 = (
+            f"{method.title()} — Peak VF: {Fpk:.6f} at (y,z)=({ypk:.3f},{zpk:.3f}) m | Eval Mode: {eval_mode} | Setback: {setback:.3f} m"
+            if np.isfinite(Fpk)
+            else f"{method.title()} | Eval Mode: {eval_mode} | Setback: {setback:.3f} m"
+        )
+        line2 = f"Yaw {yaw:.0f}° (pivot={piv}, target={tgt}){offset_text}"
+        fig.suptitle(line1 + "\n" + line2, fontsize=18)
     fig.savefig(out_png, dpi=160, bbox_inches="tight")
     if return_fig:
         return fig, (ax_xy, ax_xz, ax_hm)
