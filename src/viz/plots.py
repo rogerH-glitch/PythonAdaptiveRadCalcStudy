@@ -309,6 +309,24 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
         hm = ax_hm.imshow(np.zeros_like(F.T), origin="lower", extent=extent, aspect="equal", cmap="inferno", norm=Normalize(0, 1), interpolation=heatmap_interp)
         heatmap_title = f"Heatmap (fallback; data unavailable: {type(e).__name__})"
     # Markers and diagnostics
+    # --- P0 DEBUG START ---
+    try:
+        if vf_field is not None and vf_grid is not None and isinstance(vf_grid, dict):
+            import numpy as _np
+            gy_dbg, gz_dbg = vf_grid.get("y"), vf_grid.get("z")
+            try:
+                jj_dbg, ii_dbg = _np.unravel_index(_np.nanargmax(vf_field), _np.asarray(vf_field).shape)
+                _y_grid_dbg = float(gy_dbg[jj_dbg]) if gy_dbg is not None and jj_dbg is not None else None
+                _z_grid_dbg = float(gz_dbg[ii_dbg]) if gz_dbg is not None and ii_dbg is not None else None
+            except Exception as _e:
+                jj_dbg = ii_dbg = None
+                _y_grid_dbg = _z_grid_dbg = None
+            adaptive_peak_yz = (float(ypk), float(zpk)) if _np.isfinite(ypk) and _np.isfinite(zpk) else None
+            print(f"[p0] marker_mode={marker_mode} | grid_idx={(jj_dbg, ii_dbg)} grid_yz=({_y_grid_dbg},{_z_grid_dbg}) | "
+                  f"adaptive_yz={adaptive_peak_yz} | field_shape={None if vf_field is None else _np.asarray(vf_field).shape}")
+    except Exception:
+        pass
+    # --- P0 DEBUG END ---
     try:
         show_grid = marker_mode in ("grid", "both")
         show_adapt = marker_mode in ("adaptive", "both")

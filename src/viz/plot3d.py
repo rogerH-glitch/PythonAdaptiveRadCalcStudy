@@ -41,6 +41,18 @@ def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False):
     # Get and order corners for proper rectangle rendering
     emitter_corners = display_geom.get("corners3d", {}).get("emitter")
     receiver_corners = display_geom.get("corners3d", {}).get("receiver")
+    # --- P0 DEBUG START ---
+    try:
+        import numpy as _np
+        _em = _np.asarray(display_geom.get("corners3d", {}).get("emitter"), float)
+        _rc = _np.asarray(display_geom.get("corners3d", {}).get("receiver"), float)
+        if _em.size:
+            print("[p0-3d] emitter_corners=", _em.round(6).tolist())
+        if _rc.size:
+            print("[p0-3d] receiver_corners=", _rc.round(6).tolist())
+    except Exception:
+        pass
+    # --- P0 DEBUG END ---
     
     def mesh_from_quad(q, name, color):
         """Convert ordered quad corners to Mesh3d with two triangles."""
