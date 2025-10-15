@@ -172,6 +172,10 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     Fpk = float(result.get("vf", np.nan))
 
     fig = plt.figure(figsize=(14, 4.5))
+    try:
+        fig.set_constrained_layout(True)
+    except Exception:
+        pass
     gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.0, 1.3], wspace=0.35)
     ax_xy = fig.add_subplot(gs[0,0])
     ax_xz = fig.add_subplot(gs[0,1])
@@ -197,7 +201,7 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_xy.set_xlabel("X (m)")
     ax_xy.set_ylabel("Y (m)")
     ax_xy.set_title("Plan (X–Y)")
-    ax_xy.legend(loc="upper left", bbox_to_anchor=(0.02, 0.98))
+    ax_xy.legend(loc="upper left", bbox_to_anchor=(0, 1.02), frameon=False)
 
     # Elevation view (X-Z) - use orthographic silhouette rectangles
     emitter_corners = np.array(display_geom["corners3d"]["emitter"])
@@ -224,7 +228,7 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_xz.set_xlabel("X (m)")
     ax_xz.set_ylabel("Z (m)")
     ax_xz.set_title("Elevation (X–Z)")
-    ax_xz.legend(loc="upper left", frameon=False)
+    ax_xz.legend(loc="upper left", bbox_to_anchor=(0, 1.02), frameon=False)
     
     # Set axis bounds to include both panels with increased padding
     b = _compute_bounds_from_panels(em_xy, rec_xy, em_xz, rec_xz, pad=0.08)
@@ -242,6 +246,17 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     # Add cosmetic margins for better visual presentation
     ax_xy.margins(x=0.02, y=0.02)
     ax_xz.margins(x=0.02, y=0.02)
+
+    # Denser ticks and minor ticks for readability
+    try:
+        from matplotlib.ticker import MaxNLocator, AutoMinorLocator
+        for _ax in (ax_xy, ax_xz):
+            _ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
+            _ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
+            _ax.xaxis.set_minor_locator(AutoMinorLocator())
+            _ax.yaxis.set_minor_locator(AutoMinorLocator())
+    except Exception:
+        pass
 
     # If an explicit dense grid field is provided and preferred, use it first
     if prefer_eval_field and vf_field is not None and isinstance(vf_field, np.ndarray):
@@ -348,9 +363,16 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     
     offset_text = f" | Offset (dy,dz)=({dy:.3f},{dz:.3f}) m" if dy != 0 or dz != 0 else ""
     
-    sup = f"{method.title()} – Peak VF: {Fpk:.6f} at (y,z)=({ypk:.3f},{zpk:.3f}) m | Eval Mode: {eval_mode} | Setback: {setback:.3f} m{offset_text}" \
-          if np.isfinite(Fpk) else \
-          f"{method.title()} | Eval Mode: {eval_mode} | Setback: {setback:.3f} m{offset_text}"
+    # Include yaw/pivot/target in title for clarity
+    yaw = float(result.get("angle", 0.0))
+    piv = str(result.get("angle_pivot", "toe"))
+    tgt = str(result.get("rotate_target", "emitter"))
+    yaw_text = f" | Yaw {yaw:.0f}° (pivot={piv}, target={tgt})" if abs(yaw) > 1e-9 else ""
+    sup = (
+        f"{method.title()} — Peak VF: {Fpk:.6f} at (y,z)=({ypk:.3f},{zpk:.3f}) m | Eval Mode: {eval_mode} | Setback: {setback:.3f} m{yaw_text}{offset_text}"
+        if np.isfinite(Fpk)
+        else f"{method.title()} | Eval Mode: {eval_mode} | Setback: {setback:.3f} m{yaw_text}{offset_text}"
+    )
     fig.suptitle(sup)
     fig.savefig(out_png, dpi=160, bbox_inches="tight")
     if return_fig:
