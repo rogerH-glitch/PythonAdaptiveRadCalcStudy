@@ -741,6 +741,7 @@ def main_with_args(args) -> int:
                     vf_grid=vf_grid,
                     prefer_eval_field=True,
                     heatmap_interp=getattr(args, "heatmap_interp", "bilinear"),
+                    marker_mode=getattr(args, "heatmap_marker", "both"),
                 )
                 print(f"Combined geometry/heatmap saved to: {out_png}")
             except Exception as _e:

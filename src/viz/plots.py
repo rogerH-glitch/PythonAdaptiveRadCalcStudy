@@ -49,6 +49,46 @@ def _build_placeholder_field(receiver_w: float, receiver_h: float):
     F[Z.shape[0]//2, Y.shape[1]//2] = 1e-12
     return Y, Z, F
 
+
+def subcell_quadratic_peak(F, gy, gz, j, i):
+    """Estimate sub-cell peak around (j,i) using a 2D quadratic fit over a 3×3 neighborhood.
+    Returns (y_hat, z_hat) in physical units. If ill-conditioned, falls back to grid node.
+    """
+    F = np.asarray(F)
+    gy = np.asarray(gy, float)
+    gz = np.asarray(gz, float)
+    ny, nz = F.shape
+    if j <= 0 or j >= ny - 1 or i <= 0 or i >= nz - 1:
+        return float(gy[i]), float(gz[j])
+    Ys, Zs, Vs = [], [], []
+    for jj in (j - 1, j, j + 1):
+        for ii in (i - 1, i, i + 1):
+            v = F[jj, ii]
+            if np.isfinite(v):
+                Ys.append(gy[ii])
+                Zs.append(gz[jj])
+                Vs.append(v)
+    if len(Vs) < 6:
+        return float(gy[i]), float(gz[j])
+    Y = np.array(Ys, float)
+    Z = np.array(Zs, float)
+    V = np.array(Vs, float)
+    X = np.column_stack([Y * Y, Z * Z, Y * Z, Y, Z, np.ones_like(Y)])
+    try:
+        coeffs, *_ = np.linalg.lstsq(X, V, rcond=None)
+    except np.linalg.LinAlgError:
+        return float(gy[i]), float(gz[j])
+    a, b, c, d, e, f = coeffs
+    A = np.array([[2 * a, c], [c, 2 * b]], float)
+    bvec = -np.array([d, e], float)
+    try:
+        y_hat, z_hat = np.linalg.solve(A, bvec)
+        y_hat = float(np.clip(y_hat, gy.min(), gy.max()))
+        z_hat = float(np.clip(z_hat, gz.min(), gz.max()))
+    except np.linalg.LinAlgError:
+        y_hat, z_hat = float(gy[i]), float(gz[j])
+    return y_hat, z_hat
+
 def _rect_wire_points(center_xyz, w, h, R=np.eye(3)):
     """
     Build a rectangle lying in a local Y–Z plane at x=0, then rotate/translate into world.
@@ -106,7 +146,8 @@ def _heatmap(ax, Y, Z, F, ypk, zpk, title="View Factor Heatmap"):
     ax.figure.colorbar(cs, ax=ax, label="View Factor")
 
 def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False,
-                              vf_field=None, vf_grid=None, prefer_eval_field: bool=False, heatmap_interp: str="bilinear"):
+                              vf_field=None, vf_grid=None, prefer_eval_field: bool=False, heatmap_interp: str="bilinear",
+                              marker_mode: str="both"):
     """
     Draw Plan (X–Y), Elevation (X–Z) wireframes (Emitter red, Receiver black) and the Y–Z heatmap.
     Uses centralized display geometry for consistent rotation/translation.
@@ -252,8 +293,36 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
         from matplotlib.colors import Normalize
         hm = ax_hm.imshow(np.zeros_like(F.T), origin="lower", extent=extent, aspect="equal", cmap="inferno", norm=Normalize(0, 1), interpolation=heatmap_interp)
         heatmap_title = f"Heatmap (fallback; data unavailable: {type(e).__name__})"
-    # peak marker + label (existing behavior uses argmax on F)
-    ax_hm.plot([ypk], [zpk], marker="*", ms=12, mfc="white", mec="red")
+    # Markers and diagnostics
+    try:
+        show_grid = marker_mode in ("grid", "both")
+        show_adapt = marker_mode in ("adaptive", "both")
+        # Compute grid-argmax if we have a dense field and grid axes
+        grid_y = vf_grid.get("y") if isinstance(vf_grid, dict) else None
+        grid_z = vf_grid.get("z") if isinstance(vf_grid, dict) else None
+        if show_grid and isinstance(F, np.ndarray) and grid_y is not None and grid_z is not None:
+            gy = np.asarray(grid_y, float)
+            gz = np.asarray(grid_z, float)
+            jj, ii = np.unravel_index(np.nanargmax(F), F.shape)
+            # Sub-cell quadratic refinement for marker only
+            y_star, z_star = subcell_quadratic_peak(F, gy, gz, jj, ii)
+            ax_hm.plot([y_star], [z_star], marker="*", ms=6, mfc="none", mec="red", mew=0.8)
+        if show_adapt:
+            ax_hm.plot([ypk], [zpk], marker="x", ms=6, mfc="white", mec="black", mew=0.8)
+        # Diagnostics: grid spacing and distance from adaptive peak to nearest node
+        if grid_y is not None and grid_z is not None:
+            gy = np.asarray(grid_y, float)
+            gz = np.asarray(grid_z, float)
+            if gy.size >= 2 and gz.size >= 2 and np.isfinite(ypk) and np.isfinite(zpk):
+                dy = float((gy[-1] - gy[0]) / (gy.size - 1))
+                dz = float((gz[-1] - gz[0]) / (gz.size - 1))
+                iy = int(np.clip(np.round((ypk - gy[0]) / dy), 0, gy.size - 1))
+                jz = int(np.clip(np.round((zpk - gz[0]) / dz), 0, gz.size - 1))
+                y_near = float(gy[iy]); z_near = float(gz[jz])
+                d = float(np.hypot(y_near - ypk, z_near - zpk))
+                print(f"[diag] grid Δy≈{dy:.3f} Δz≈{dz:.3f} | dist_to_nearest_node≈{d:.3f} m")
+    except Exception:
+        pass
     ax_hm.set_title(heatmap_title)
     ax_hm.set_xlabel("Y (m)")
     ax_hm.set_ylabel("Z (m)")

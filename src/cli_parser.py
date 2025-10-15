@@ -347,6 +347,12 @@ Default assumptions:
         help='Heatmap interpolation method (default: bilinear)'
     )
     peak_group.add_argument(
+        '--heatmap-marker',
+        choices=['adaptive', 'grid', 'both'],
+        default='both',
+        help='Heatmap marker mode: adaptive peak, grid argmax, or both'
+    )
+    peak_group.add_argument(
         '--rc-search-rel-tol',
         type=float,
         default=3e-3,
