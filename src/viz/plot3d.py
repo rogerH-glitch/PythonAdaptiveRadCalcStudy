@@ -71,6 +71,14 @@ def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False, deb
         except Exception:
             pass
         traces.append(mesh_from_quad(em, "Emitter", "red"))
+        # --- G4: thin wireframe outline (closed loop) ---
+        def _edge_loop(q):
+            q = np.asarray(q, float)
+            loop = np.vstack([q, q[0:1]])
+            return loop[:, 0], loop[:, 1], loop[:, 2]
+        ex, ey, ez = _edge_loop(em)
+        traces.append(go.Scatter3d(x=ex, y=ey, z=ez, mode="lines",
+                                   line=dict(width=2), name="Emitter edge", showlegend=False))
 
     if receiver_corners is not None:
         # Convert list to numpy array and take first 4 points (remove duplicates)
@@ -81,6 +89,9 @@ def plot_geometry_3d(result: dict, out_html: str, *, return_fig: bool=False, deb
         except Exception:
             pass
         traces.append(mesh_from_quad(rc, "Receiver", "black"))
+        rx, ry, rz = _edge_loop(rc)
+        traces.append(go.Scatter3d(x=rx, y=ry, z=rz, mode="lines",
+                                   line=dict(width=2), name="Receiver edge", showlegend=False))
     
     # Create figure with title
     fig = go.Figure(data=traces)
