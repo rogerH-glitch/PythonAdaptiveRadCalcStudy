@@ -272,6 +272,25 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     except Exception:
         pass
 
+    # --- G2: legends below x-axis, outside the plots ---
+    try:
+        fig.set_constrained_layout(True)
+        def _legend_below(_ax):
+            lg = _ax.get_legend()
+            if lg is not None:
+                _ax.legend(
+                    loc="upper left",
+                    bbox_to_anchor=(0.0, -0.18),
+                    frameon=False,
+                    borderaxespad=0.0,
+                    handlelength=2.0,
+                    handletextpad=0.8,
+                )
+        _legend_below(ax_xy)
+        _legend_below(ax_xz)
+    except Exception:
+        pass
+
     # If an explicit dense grid field is provided and preferred, use it first
     if prefer_eval_field and vf_field is not None and isinstance(vf_field, np.ndarray):
         F = vf_field
