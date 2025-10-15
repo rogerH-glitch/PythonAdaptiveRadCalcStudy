@@ -186,7 +186,7 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_xz.legend(loc="upper left", frameon=False)
     
     # Set axis bounds to include both panels with increased padding
-    b = _compute_bounds_from_panels(em_xy, rec_xy, em_xz, rec_xz, pad=0.05)
+    b = _compute_bounds_from_panels(em_xy, rec_xy, em_xz, rec_xz, pad=0.08)
     (xlim_xy, ylim_xy) = b["xy"]
     (xlim_xz, zlim_xz) = b["xz"]
     ax_xy.set_xlim(*xlim_xy)
