@@ -7,6 +7,19 @@ from matplotlib.patches import Rectangle
 from .display_geom import build_display_geom
 from ..util.plot_payload import has_field
 
+def _compute_bounds_from_panels(p_em_xy, p_rec_xy, p_em_xz, p_rec_xz, pad=0.02):
+    """Compute axis bounds to include both emitter and receiver panels with padding."""
+    def _bounds(a, b):
+        both = np.vstack([a, b])
+        xmin, ymin = both.min(axis=0); xmax, ymax = both.max(axis=0)
+        dx, dy = xmax - xmin, ymax - ymin
+        ex = pad if dx < 1e-12 else pad * dx
+        ey = pad if dy < 1e-12 else pad * dy
+        return (xmin - ex, xmax + ex), (ymin - ey, ymax + ey)
+    (xlim_xy, ylim_xy) = _bounds(p_em_xy, p_rec_xy)
+    (xlim_xz, zlim_xz) = _bounds(p_em_xz, p_rec_xz)
+    return {"xy": (xlim_xy, ylim_xy), "xz": (xlim_xz, zlim_xz)}
+
 PLACEHOLDER_NY = 40
 PLACEHOLDER_NZ = 40
 
@@ -81,7 +94,8 @@ def _heatmap(ax, Y, Z, F, ypk, zpk, title="View Factor Heatmap"):
     ax.set_ylabel("Z (m)")
     ax.figure.colorbar(cs, ax=ax, label="View Factor")
 
-def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False):
+def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, return_fig: bool=False,
+                              vf_field=None, vf_grid=None, prefer_eval_field: bool=False):
     """
     Draw Plan (X–Y), Elevation (X–Z) wireframes (Emitter red, Receiver black) and the Y–Z heatmap.
     Uses centralized display geometry for consistent rotation/translation.
@@ -115,6 +129,10 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     emitter_xy = display_geom["xy"]["emitter"]
     receiver_xy = display_geom["xy"]["receiver"]
     
+    # Convert to numpy arrays for bounds computation
+    em_xy = np.array(emitter_xy) if emitter_xy else np.array([[0, 0], [0, 0]])
+    rec_xy = np.array(receiver_xy) if receiver_xy else np.array([[0, 0], [0, 0]])
+    
     if emitter_xy:
         (x0, y0), (x1, y1) = emitter_xy
         ax_xy.plot([x0, x1], [y0, y1], color="red", lw=2.0, label=f"Emitter {result.get('We', 5.0):.3g}×{result.get('He', 2.0):.3g} m")
@@ -132,6 +150,10 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     # Elevation view (X-Z) - use thin rectangles
     emitter_xz = display_geom["xz"]["emitter"]
     receiver_xz = display_geom["xz"]["receiver"]
+    
+    # Convert to numpy arrays for bounds computation
+    em_xz = np.array([[emitter_xz["x"], emitter_xz["z0"]], [emitter_xz["x"], emitter_xz["z1"]]]) if emitter_xz else np.array([[0, 0], [0, 0]])
+    rec_xz = np.array([[receiver_xz["x"], receiver_xz["z0"]], [receiver_xz["x"], receiver_xz["z1"]]]) if receiver_xz else np.array([[0, 0], [0, 0]])
     
     if emitter_xz:
         rect = Rectangle((emitter_xz["x"] - 0.01, emitter_xz["z0"]), 0.02, 
@@ -151,12 +173,31 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_xz.set_xlabel("X (m)")
     ax_xz.set_ylabel("Z (m)")
     ax_xz.set_title("Elevation (X–Z)")
+    
+    # Set axis bounds to include both panels
+    b = _compute_bounds_from_panels(em_xy, rec_xy, em_xz, rec_xz, pad=0.02)
+    (xlim_xy, ylim_xy) = b["xy"]
+    (xlim_xz, zlim_xz) = b["xz"]
+    ax_xy.set_xlim(*xlim_xy)
+    ax_xy.set_ylim(*ylim_xy)
+    ax_xz.set_xlim(*xlim_xz)
+    ax_xz.set_ylim(*zlim_xz)
 
-    # Field capture (tap preferred)
-    field = getattr(result, "field", None)
-    Y = getattr(field, "Y", None) if field is not None else None
-    Z = getattr(field, "Z", None) if field is not None else None
-    F = getattr(field, "F", None) if field is not None else None
+    # If an explicit dense grid field is provided and preferred, use it first
+    if prefer_eval_field and vf_field is not None and isinstance(vf_field, np.ndarray):
+        F = vf_field
+        if isinstance(vf_grid, dict):
+            gy = vf_grid.get("y", None)
+            gz = vf_grid.get("z", None)
+            if gy is not None and gz is not None:
+                # Build meshgrid matching F orientation (nz, ny)
+                Y, Z = np.meshgrid(np.asarray(gy, float), np.asarray(gz, float), indexing="xy")
+    else:
+        # Field capture (tap preferred) or fallback to result field
+        field = getattr(result, "field", None)
+        Y = getattr(field, "Y", None) if field is not None else None
+        Z = getattr(field, "Z", None) if field is not None else None
+        F = getattr(field, "F", None) if field is not None else None
 
     # If field missing, always ensure we have something to render.
     if Y is None or Z is None or F is None:
@@ -171,15 +212,22 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
         except Exception:
             Y, Z, F = _build_placeholder_field(rW, rH)
 
-    # Heatmap rendering
+    # Heatmap rendering (no extra normalisation; vf_field is already 0..1 view factor)
     heatmap_title = "View Factor Heatmap"
+    
+    # Derive extent from receiver physical coordinates
+    y_min, y_max = float(np.min(rec_xy[:,1])), float(np.max(rec_xy[:,1]))
+    z_min, z_max = float(np.min(rec_xz[:,1])), float(np.max(rec_xz[:,1]))
+    extent = [y_min, y_max, z_min, z_max]
+    
     try:
-        hm = ax_hm.pcolormesh(Y, Z, F, shading="auto", cmap="inferno")
+        # Use imshow with proper extent for physical coordinates
+        hm = ax_hm.imshow(F.T, origin="lower", extent=extent, aspect="auto", cmap="inferno")
     except Exception as e:
         # Fallback: draw a blank heatmap grid to avoid crashing the CLI
         # and surface a friendly message in the figure title.
         from matplotlib.colors import Normalize
-        hm = ax_hm.pcolormesh(Y, Z, np.zeros_like(F), shading="auto", cmap="inferno", norm=Normalize(0, 1))
+        hm = ax_hm.imshow(np.zeros_like(F.T), origin="lower", extent=extent, aspect="auto", cmap="inferno", norm=Normalize(0, 1))
         heatmap_title = f"Heatmap (fallback; data unavailable: {type(e).__name__})"
     # peak marker + label (existing behavior uses argmax on F)
     ax_hm.plot([ypk], [zpk], marker="*", ms=12, mfc="white", mec="red")
@@ -187,6 +235,15 @@ def plot_geometry_and_heatmap(*, result, eval_mode, method, setback, out_png, re
     ax_hm.set_xlabel("Y (m)")
     ax_hm.set_ylabel("Z (m)")
     fig.colorbar(hm, ax=ax_hm, label="View Factor")
+
+    # Plausibility check for accidental re-normalisation
+    try:
+        if F is not None:
+            vmax = float(np.nanmax(F))
+            if vmax < 1e-6:
+                print("[warn] heatmap vf_field peak is extremely small; check normalisation")
+    except Exception:
+        pass
 
     # Title with offset information
     # Calculate offset from receiver_center if not explicitly provided

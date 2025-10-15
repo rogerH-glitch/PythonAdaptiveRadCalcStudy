@@ -159,6 +159,77 @@ def run_calculation(args) -> Dict[str, Any]:
             # Attach to result if we have valid data
             if Y is not None and Z is not None and F is not None:
                 attach_grid_field(result, Y, Z, F)
+        # Also attach any tapped field captured during evaluation, regardless of plotting flags
+        try:
+            tapped = _drain_grid()
+            if tapped is not None:
+                Yt, Zt, Ft = tapped
+                attach_grid_field(result, Yt, Zt, Ft)
+        except Exception:
+            pass
+        # If still no field and in pure grid mode, generate a dense grid via the evaluator
+        if args.rc_mode == 'grid' and not has_field(result):
+            try:
+                # Build fast-path point evaluator (no peak search)
+                from .peak_locator import create_vf_evaluator
+                # Override method params for fast grid evaluation (no peak search)
+                fast_params = (method_params or {}).copy()
+                fast_params.update({
+                    'max_cells': 1500,
+                    'max_iters': 40,
+                    'rel_tol': 1e-2,  # Looser tolerance for speed
+                    'abs_tol': 1e-4,
+                    'peak_search': False,  # Disable peak search
+                    'multistart': 1,       # Single evaluation per point
+                })
+                vf_evaluator = create_vf_evaluator(
+                    args.method, em_w, em_h, rc_w, rc_h, setback, angle, geom_cfg, **fast_params
+                )
+                print("[grid] fast-path point evaluator active")
+                import numpy as _np
+                import time as _time
+                from .eval.watchdog import check_time as _check_time, Timeout as _Timeout
+                from .eval.cancel import CancelToken as _CancelToken
+                ny = int(getattr(args, 'rc_grid_n', 41))
+                nz = ny
+                y_coords = _np.linspace(-rc_w/2.0, rc_w/2.0, ny)
+                z_coords = _np.linspace(-rc_h/2.0, rc_h/2.0, nz)
+                Yg, Zg = _np.meshgrid(y_coords, z_coords, indexing='xy')
+                Fg = _np.empty_like(Yg, dtype=float)
+                start_ts = _time.time()
+                every_n = 25
+                time_limit_s = float(getattr(args, 'rc_search_time_limit_s', 3.0) or 3.0)
+                token = _CancelToken(timeout_s=time_limit_s)
+                # Per-point time budget
+                per_point_budget = max(0.003, 0.25 * time_limit_s / (ny * nz))
+                try:
+                    for j in range(Zg.shape[0]):
+                        # Cooperative global timeout check
+                        if token.expired():
+                            print("[warn] grid timeout -> partial return")
+                            Fg[j:, :] = float("nan")
+                            break
+                        for i in range(Yg.shape[1]):
+                            # Use fast-path point evaluation with per-point budget
+                            try:
+                                vf_val, _meta = vf_evaluator(float(Yg[0, i]), float(Zg[j, 0]))
+                            except Exception as _e:
+                                # If point evaluation fails, use NaN
+                                vf_val = float('nan')
+                            Fg[j, i] = float(vf_val)
+                            _check_time(start_ts, time_limit_s, every_n, j*Yg.shape[1] + i)
+                except _Timeout as _e:
+                    # Fill remainder with NaN and warn
+                    Fg[j:, i:] = float('nan')
+                    print(f"[warn] grid evaluation timed out: {_e}")
+                attach_grid_field(result, Yg, Zg, Fg)
+                # Also expose 1-D axes for downstream consumers
+                result['grid_y'] = y_coords
+                result['grid_z'] = z_coords
+                # Ensure vf_field is available for compatibility
+                result['vf_field'] = Fg
+            except Exception as _e:
+                logger.debug("dense grid generation failed: %s", _e)
     
     return result
 
@@ -344,27 +415,32 @@ def main_with_args(args) -> int:
         # Run calculation
         result = run_calculation(args)
 
-        # If solver captured a field, attach it; else sample a coarse field for plotting only
+        # Check if we already have field data from run_calculation
         if getattr(args, "eval_mode", None) in ("grid", "search"):
-            tapped = _drain_grid()
-            if tapped is not None:
-                Y, Z, F = tapped
-                try:
-                    attach_grid_field(result, Y, Z, F)
-                    print(f"[plot] using captured field: shape={getattr(F, 'shape', None)}")
-                except Exception as _e:
-                    logger.debug("attach_grid_field skipped: %s", _e)
+            if has_field(result):
+                F = result["F"]
+                print(f"[plot] using dense grid field: shape={getattr(F, 'shape', None)}")
             else:
-                # Fallback sampler (plotting only)
-                try:
-                    result = sample_receiver_field(args, result)
-                    if has_field(result):
-                        F = result["F"]
-                        print(f"[plot] sampled coarse receiver field: shape={getattr(F,'shape',None)}")
-                    else:
-                        print("[plot] note: no receiver field was captured and sampler unavailable; heat-map may be empty")
-                except Exception as e:
-                    logger.debug("coarse sampler failed: %s", e)
+                # Try to get field from tap as fallback
+                tapped = _drain_grid()
+                if tapped is not None:
+                    Y, Z, F = tapped
+                    try:
+                        attach_grid_field(result, Y, Z, F)
+                        print(f"[plot] using captured field: shape={getattr(F, 'shape', None)}")
+                    except Exception as _e:
+                        logger.debug("attach_grid_field skipped: %s", _e)
+                else:
+                    # Fallback sampler (plotting only)
+                    try:
+                        result = sample_receiver_field(args, result)
+                        if has_field(result):
+                            F = result["F"]
+                            print(f"[plot] sampled coarse receiver field: shape={getattr(F,'shape',None)}")
+                        else:
+                            print("[plot] note: no receiver field was captured and sampler unavailable; heat-map may be empty")
+                    except Exception as e:
+                        logger.debug("coarse sampler failed: %s", e)
         
         # Print and save results
         print_results(result, args)
@@ -438,6 +514,11 @@ def main_with_args(args) -> int:
                     method=args.method,
                     setback=float(args.setback),
                     out_png=out_png,
+                    # Prefer using attached/captured grid field when available
+                    vf_field=result.get("F", None),
+                    vf_grid={"y": result.get("grid_y"),
+                             "z": result.get("grid_z")},
+                    prefer_eval_field=True,
                 )
                 print(f"Combined geometry/heatmap saved to: {out_png}")
             except Exception as _e:
