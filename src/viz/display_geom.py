@@ -284,6 +284,22 @@ def _apply_about_pivot(points_3xN, R, pivot3):
 def _order_quad(corners3d: np.ndarray) -> np.ndarray:
     return order_quad(corners3d)
 
+def _place_with_setback(em_corners, rc_corners, normal, setback, pivot="toe"):
+    """
+    Translate the non-target panel along `normal` so that the minimum signed
+    support distance between polygons along `normal` equals `setback`.
+    em_corners, rc_corners: (4,3); normal: (3,)
+    """
+    n = normal/np.linalg.norm(normal)
+    # Support points along +n:
+    em_min = np.min(em_corners @ n)   # near face of emitter along +n
+    em_max = np.max(em_corners @ n)
+    rc_min = np.min(rc_corners @ n)
+    rc_max = np.max(rc_corners @ n)
+    # For target=emitter, receiver must sit at: rc_min = em_min + setback
+    delta = (em_min + setback) - rc_min
+    rc_corners = rc_corners + delta * n
+    return em_corners, rc_corners
 
 def _extract_offsets(cfg) -> tuple[float, float]:
     """
@@ -521,13 +537,38 @@ def build_display_geom(*args, **kwargs) -> dict:
     E0 = emitter_local + base.reshape(3, 1)
     R0 = receiver_local + (base + np.array([setback, 0.0, 0.0])).reshape(3, 1)
 
+    # Track if we've applied setback preservation for rotated cases
+    setback_preserved = False
+    
     # Apply rotations about the chosen target only
     if target == "emitter":
         E1 = _apply_about_pivot(E0, R, emitter_pivot_world)
-        R1 = R0  # receiver unchanged -> preserves setback
+        # For toe pivot with emitter target, preserve setback after rotation
+        if pivot_mode == "toe":
+            # Compute emitter face normal after rotation
+            n_em = R @ np.array([1.0, 0.0, 0.0])  # +x direction after rotation
+            E1_corners = E1.T  # Convert to 4x3 for _place_with_setback
+            R0_corners = R0.T  # Convert to 4x3 for _place_with_setback
+            _, R1_corners = _place_with_setback(E1_corners, R0_corners, n_em, setback, "toe")
+            R1 = R1_corners.T  # Convert back to 3x4
+            setback_preserved = True
+        else:
+            R1 = R0  # receiver unchanged for center pivot
     elif target == "receiver":
         E1 = E0
         R1 = _apply_about_pivot(R0, R, receiver_pivot_world)
+        # For toe pivot with receiver target, preserve setback after rotation
+        if pivot_mode == "toe":
+            # Compute receiver face normal after rotation
+            n_rc = R @ np.array([-1.0, 0.0, 0.0])  # -x direction after rotation
+            E0_corners = E0.T  # Convert to 4x3 for _place_with_setback
+            R1_corners = R1.T  # Convert to 4x3 for _place_with_setback
+            # For receiver target, receiver is fixed, emitter needs to be moved
+            # Use the normal pointing from receiver to emitter (same as receiver normal)
+            # Swap arguments so emitter gets moved
+            _, E1_corners = _place_with_setback(R1_corners, E0_corners, n_rc, setback, "toe")
+            E1 = E1_corners.T  # Convert back to 3x4
+            setback_preserved = True
     else:  # "both"
         E1 = _apply_about_pivot(E0, R, emitter_pivot_world)
         R1 = _apply_about_pivot(R0, R, receiver_pivot_world)
@@ -557,8 +598,9 @@ def build_display_geom(*args, **kwargs) -> dict:
         emitter_corners = _order_quad(np.asarray(emitter_corners))
         receiver_corners = _order_quad(np.asarray(receiver_corners))
 
-    # 3) Translate along X to satisfy placement
-    if sb_given or dx0 != 0.0:
+    # 3) Translate along X to satisfy placement (skip if setback already preserved for rotated cases)
+    # For center pivot, the rotation logic already maintains the correct setback, so skip translation
+    if (sb_given or dx0 != 0.0) and not setback_preserved and pivot_mode != "center":
         emitter_corners = _translate_to_setback(emitter_corners, mode=pivot, setback=sb, treat_as="emitter", dx0=dx0)
         receiver_corners = _translate_to_setback(receiver_corners, mode=pivot, setback=sb, treat_as="receiver", dx0=dx0)
     
